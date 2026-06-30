@@ -5,8 +5,8 @@ detect but never prevent. Enforcement therefore happens here, in the SDK, at the
 before-tool-call hook: ask the backend for a verdict on the proposed tool call
 and cancel it on BLOCK before it executes.
 
-Opt-in: a PolicyEnforcer is built only when AIGENTRAIL_DECIDE_ENDPOINT and
-AIGENTRAIL_API_KEY are both set, so the default behaviour stays observe-only.
+Opt-in: a PolicyEnforcer is built only when GENTRAIL_DECIDE_ENDPOINT and
+GENTRAIL_API_KEY are both set, so the default behaviour stays observe-only.
 """
 
 from __future__ import annotations
@@ -29,8 +29,8 @@ class PolicyEnforcer:
 
     @classmethod
     def from_env(cls) -> "PolicyEnforcer | None":
-        endpoint = os.environ.get("AIGENTRAIL_DECIDE_ENDPOINT", "").strip()
-        api_key = os.environ.get("AIGENTRAIL_API_KEY", "").strip()
+        endpoint = os.environ.get("GENTRAIL_DECIDE_ENDPOINT", "").strip()
+        api_key = os.environ.get("GENTRAIL_API_KEY", "").strip()
         if not endpoint or not api_key:
             return None
         return cls(endpoint, api_key)

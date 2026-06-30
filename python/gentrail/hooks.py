@@ -35,7 +35,7 @@ from .evidence_ledger import (
 from .enforcement import PolicyEnforcer
 from .otel_exporter import GovernanceTracer
 
-logger = logging.getLogger("aigentrail.hooks")
+logger = logging.getLogger("gentrail.hooks")
 
 
 class GentrailGovernanceHook(HookProvider):

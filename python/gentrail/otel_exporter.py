@@ -1,7 +1,7 @@
 """OTel span exporter for governance events.
 
-Enabled by default when AIGENTRAIL_API_KEY is set.
-Exports to https://otel.aigentrail.com unless overridden by
+Enabled by default when GENTRAIL_API_KEY is set.
+Exports to https://otel.gentrail.ai unless overridden by
 OTEL_EXPORTER_OTLP_ENDPOINT.
 """
 
@@ -13,7 +13,7 @@ import os
 import threading
 from typing import Any
 
-logger = logging.getLogger("aigentrail.otel")
+logger = logging.getLogger("gentrail.otel")
 
 # Lazy-loaded OTel modules — None until _try_import_otel() succeeds.
 _trace_mod: Any = None
@@ -197,19 +197,19 @@ _singleton_lock = threading.Lock()
 _singleton_attempted = False
 
 
-DEFAULT_ENDPOINT = "https://otel.aigentrail.com"
+DEFAULT_ENDPOINT = "https://otel.gentrail.ai"
 
 
 def create_governance_tracer() -> GovernanceTracer | None:
-    """Build a GovernanceTracer from env vars. Returns None if AIGENTRAIL_API_KEY is missing."""
-    api_key = os.environ.get("AIGENTRAIL_API_KEY", "")
+    """Build a GovernanceTracer from env vars. Returns None if GENTRAIL_API_KEY is missing."""
+    api_key = os.environ.get("GENTRAIL_API_KEY", "")
     if not api_key:
         return None
 
     endpoint = os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT", DEFAULT_ENDPOINT)
 
     if not _try_import_otel():
-        logger.warning("AIGENTRAIL_API_KEY set but opentelemetry packages not installed")
+        logger.warning("GENTRAIL_API_KEY set but opentelemetry packages not installed")
         return None
 
     credentials = base64.b64encode(f"{api_key}:{api_key}".encode()).decode()

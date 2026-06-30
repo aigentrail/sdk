@@ -12,7 +12,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _spec = importlib.util.spec_from_file_location(
-    "enforcement", os.path.join(_HERE, "..", "aigentrail", "enforcement.py")
+    "enforcement", os.path.join(_HERE, "..", "gentrail", "enforcement.py")
 )
 _mod = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(_mod)
@@ -60,11 +60,11 @@ def test_fails_open_when_backend_unreachable():
 
 
 def test_from_env_requires_endpoint_and_key():
-    saved = {k: os.environ.pop(k, None) for k in ("AIGENTRAIL_DECIDE_ENDPOINT", "AIGENTRAIL_API_KEY")}
+    saved = {k: os.environ.pop(k, None) for k in ("GENTRAIL_DECIDE_ENDPOINT", "GENTRAIL_API_KEY")}
     try:
         assert PolicyEnforcer.from_env() is None
-        os.environ["AIGENTRAIL_DECIDE_ENDPOINT"] = "https://example.test"
-        os.environ["AIGENTRAIL_API_KEY"] = "sk"
+        os.environ["GENTRAIL_DECIDE_ENDPOINT"] = "https://example.test"
+        os.environ["GENTRAIL_API_KEY"] = "sk"
         assert PolicyEnforcer.from_env() is not None
     finally:
         for k, val in saved.items():
