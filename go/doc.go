@@ -10,6 +10,14 @@
 // New reads GENTRAIL_API_KEY and OTEL_EXPORTER_OTLP_ENDPOINT from the
 // environment by default; both can be overridden via options.
 //
+// # PII redaction
+//
+// Client-side PII redaction is on by default: high-confidence PII in span
+// input and output values (emails, SSNs, credit cards, AWS keys) is replaced
+// with a typed placeholder before the span leaves the process, so the raw
+// value never reaches the collector while the data class stays visible for
+// governance. Disable with WithRedaction(false) or GENTRAIL_REDACT_PII=false.
+//
 // # Example
 //
 //	tracer, err := gentrail.New(ctx)

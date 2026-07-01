@@ -9,6 +9,7 @@ type config struct {
 	certificateFile   string
 	insecure          bool
 	setGlobalProvider bool
+	redact            bool
 }
 
 // WithAPIKey sets the bearer credential used for OTLP Basic auth. Overrides
@@ -39,4 +40,13 @@ func WithInsecure() Option {
 // surprising callers who already manage their own provider.
 func WithSetGlobalProvider() Option {
 	return func(c *config) { c.setGlobalProvider = true }
+}
+
+// WithRedaction toggles client-side PII redaction. When enabled (the default),
+// high-confidence PII in span input and output values is replaced with a typed
+// placeholder ([EMAIL], [SSN], [CREDIT_CARD], [AWS_KEY]) before the span leaves
+// the process, so the raw value never reaches the collector. Overrides
+// GENTRAIL_REDACT_PII.
+func WithRedaction(enabled bool) Option {
+	return func(c *config) { c.redact = enabled }
 }
