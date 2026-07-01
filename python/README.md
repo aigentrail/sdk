@@ -28,6 +28,14 @@ The SDK composes four pieces:
 - `evidence_ledger.py` - a local append-only audit log with integrity hashes.
 - `otel_exporter.py` - pushes the captured spans over OTLP.
 
+## PII redaction
+
+The OTLP exporter redacts high-confidence PII (emails, SSNs, credit cards, AWS
+keys) from span input and output values before they leave the process, replacing
+each with a typed placeholder like `[EMAIL]`, so the raw value never reaches the
+collector while the data class stays visible for governance. On by default; opt
+out with `GENTRAIL_REDACT_PII=false` or `create_governance_tracer(redact=False)`.
+
 ## Inline enforcement (opt-in)
 
 The async backend evaluator only sees a trace after a tool has already run, so
@@ -53,4 +61,5 @@ allowed and enforcement is skipped for that step.
 uv sync --extra strands
 ruff check .
 python3 tests/test_enforcement.py
+python3 tests/test_redaction.py
 ```

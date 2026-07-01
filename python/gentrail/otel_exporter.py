@@ -10,10 +10,57 @@ from __future__ import annotations
 import base64
 import logging
 import os
+import re
 import threading
 from typing import Any
 
 logger = logging.getLogger("gentrail.otel")
+
+# --- Client-side PII redaction ------------------------------------------------
+# High-confidence PII in span input/output values is replaced with a typed
+# placeholder before the span leaves the process, so the raw value never reaches
+# the collector while the data class stays visible for governance. On by
+# default; disable with GENTRAIL_REDACT_PII=false or create_governance_tracer(
+# redact=False). Mirrors the Go SDK's redaction.
+_EMAIL_RE = re.compile(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}")
+_SSN_RE = re.compile(r"\b\d{3}-\d{2}-\d{4}\b")
+_AWS_KEY_RE = re.compile(r"\b(?:AKIA|ASIA|AIDA|AROA)[0-9A-Z]{16}\b")
+# A card candidate is 13-19 digits with optional space/dash separators; the Luhn
+# check keeps random long numbers from being redacted.
+_CARD_RE = re.compile(r"\b\d(?:[ -]?\d){12,18}\b")
+
+
+def _luhn_valid(s: str) -> bool:
+    """Report whether the 13-19 digits in s pass the Luhn checksum."""
+    digits = [ord(c) - 48 for c in s if "0" <= c <= "9"]
+    if not 13 <= len(digits) <= 19:
+        return False
+    total, double = 0, False
+    for d in reversed(digits):
+        if double:
+            d *= 2
+            if d > 9:
+                d -= 9
+        total += d
+        double = not double
+    return total % 10 == 0
+
+
+def _card_placeholder(m: "re.Match[str]") -> str:
+    return "[CREDIT_CARD]" if _luhn_valid(m.group(0)) else m.group(0)
+
+
+def redact_pii(s: str) -> str:
+    """Replace high-confidence PII in s with a typed placeholder. Emails and SSNs
+    are removed before the card scan so their digits can't be mistaken for a card.
+    """
+    if not s:
+        return s
+    s = _EMAIL_RE.sub("[EMAIL]", s)
+    s = _SSN_RE.sub("[SSN]", s)
+    s = _AWS_KEY_RE.sub("[AWS_KEY]", s)
+    s = _CARD_RE.sub(_card_placeholder, s)
+    return s
 
 # Lazy-loaded OTel modules — None until _try_import_otel() succeeds.
 _trace_mod: Any = None
@@ -48,9 +95,17 @@ def _try_import_otel() -> bool:
 class GovernanceTracer:
     """Wraps an OTel Tracer to emit governance-specific spans."""
 
-    def __init__(self, tracer: Any, provider: Any) -> None:
+    def __init__(self, tracer: Any, provider: Any, redact: bool = True) -> None:
         self._tracer = tracer
         self._provider = provider
+        self._redact = redact
+
+    def _value(self, s: str) -> str:
+        """Redact PII (when enabled) then cap at the 4000-rune attribute limit.
+        Redaction runs first so a value straddling the cap is still scrubbed."""
+        if self._redact:
+            s = redact_pii(s)
+        return s[:4000]
 
     def start_invocation(
         self,
@@ -65,7 +120,7 @@ class GovernanceTracer:
         span.set_attribute("agent.name", agent_name)
         span.set_attribute("aigentrail.journal.id", journal_id)
         span.set_attribute("session.id", journal_id)
-        span.set_attribute("input.value", user_message[:4000])
+        span.set_attribute("input.value", self._value(user_message))
         span.set_attribute("source", "aigentrail-sdk")
         return span
 
@@ -79,7 +134,7 @@ class GovernanceTracer:
         integrity_hash: str,
         status: str = "ok",
     ) -> None:
-        span.set_attribute("output.value", response[:4000])
+        span.set_attribute("output.value", self._value(response))
         span.set_attribute("aigentrail.invocation.status", status)
         span.set_attribute("aigentrail.journal.integrity_hash", integrity_hash)
         span.set_attribute("llm.token_count.total", total_tokens)
@@ -102,8 +157,8 @@ class GovernanceTracer:
         with self._tracer.start_as_current_span("governance.model_call", context=ctx) as span:
             span.set_attribute("openinference.span.kind", "LLM")
             span.set_attribute("llm.model_name", model_id)
-            span.set_attribute("input.value", prompt[:4000])
-            span.set_attribute("output.value", response_text[:4000])
+            span.set_attribute("input.value", self._value(prompt))
+            span.set_attribute("output.value", self._value(response_text))
             span.set_attribute("llm.token_count.prompt", input_tokens)
             span.set_attribute("llm.token_count.completion", output_tokens)
             if latency_ms is not None:
@@ -129,8 +184,8 @@ class GovernanceTracer:
             # tool_calls before the parent invocation span has ended.
             span.set_attribute("aigentrail.agent.id", agent_id)
             span.set_attribute("agent.name", agent_name)
-            span.set_attribute("input.value", args[:4000])
-            span.set_attribute("output.value", result[:4000])
+            span.set_attribute("input.value", self._value(args))
+            span.set_attribute("output.value", self._value(result))
             if duration_ms is not None:
                 span.set_attribute("aigentrail.latency_ms", duration_ms)
 
@@ -200,11 +255,16 @@ _singleton_attempted = False
 DEFAULT_ENDPOINT = "https://otel.gentrail.ai"
 
 
-def create_governance_tracer() -> GovernanceTracer | None:
-    """Build a GovernanceTracer from env vars. Returns None if GENTRAIL_API_KEY is missing."""
+def create_governance_tracer(redact: bool | None = None) -> GovernanceTracer | None:
+    """Build a GovernanceTracer from env vars. Returns None if GENTRAIL_API_KEY is
+    missing. PII redaction defaults on unless redact is passed or
+    GENTRAIL_REDACT_PII=false."""
     api_key = os.environ.get("GENTRAIL_API_KEY", "")
     if not api_key:
         return None
+
+    if redact is None:
+        redact = os.environ.get("GENTRAIL_REDACT_PII", "").lower() != "false"
 
     endpoint = os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT", DEFAULT_ENDPOINT)
 
@@ -236,7 +296,7 @@ def create_governance_tracer() -> GovernanceTracer | None:
 
     tracer = _trace_mod.get_tracer("aigentrail.governance")
     logger.info("Governance OTel tracer initialized → %s", endpoint)
-    return GovernanceTracer(tracer, provider)
+    return GovernanceTracer(tracer, provider, redact=redact)
 
 
 def get_governance_tracer() -> GovernanceTracer | None:

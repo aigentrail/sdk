@@ -31,6 +31,7 @@ func New(ctx context.Context, opts ...Option) (*Tracer, error) {
 	cfg := config{
 		apiKey:   os.Getenv("GENTRAIL_API_KEY"),
 		endpoint: os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT"),
+		redact:   !strings.EqualFold(os.Getenv("GENTRAIL_REDACT_PII"), "false"),
 	}
 	for _, opt := range opts {
 		opt(&cfg)
@@ -51,7 +52,12 @@ func New(ctx context.Context, opts ...Option) (*Tracer, error) {
 		return nil, fmt.Errorf("gentrail: create OTLP exporter: %w", err)
 	}
 
-	provider := sdktrace.NewTracerProvider(sdktrace.WithBatcher(exporter))
+	var spanExporter sdktrace.SpanExporter = exporter
+	if cfg.redact {
+		spanExporter = redactingExporter{SpanExporter: exporter}
+	}
+
+	provider := sdktrace.NewTracerProvider(sdktrace.WithBatcher(spanExporter))
 	if cfg.setGlobalProvider {
 		otel.SetTracerProvider(provider)
 	}
