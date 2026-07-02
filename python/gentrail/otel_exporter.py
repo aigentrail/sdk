@@ -261,6 +261,18 @@ def create_governance_tracer(redact: bool | None = None) -> GovernanceTracer | N
     GENTRAIL_REDACT_PII=false."""
     api_key = os.environ.get("GENTRAIL_API_KEY", "")
     if not api_key:
+        # Opting out by setting nothing stays silent, but half-configured
+        # environments must not fail into silent no-tracing: that failure mode
+        # cost a day of debugging when the aigentrail -> gentrail env rename
+        # left consumers exporting the old key name.
+        if os.environ.get("AIGENTRAIL_API_KEY"):
+            logger.warning(
+                "AIGENTRAIL_API_KEY is set but this SDK reads GENTRAIL_API_KEY; governance tracing disabled"
+            )
+        elif os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT"):
+            logger.warning(
+                "OTEL_EXPORTER_OTLP_ENDPOINT is set but GENTRAIL_API_KEY is not; governance tracing disabled"
+            )
         return None
 
     if redact is None:
