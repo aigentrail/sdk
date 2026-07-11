@@ -61,6 +61,11 @@ class GentrailGovernanceHook(HookProvider):
         self._invocation_span: Any | None = None
         self._accumulated_usage_before_model_call: dict[str, int] | None = None
         self._system_prompt: str = ""
+        # Non-ALLOW verdicts from the before-tool-call hook, keyed by toolUseId
+        # (tool name when absent), consumed when the tool span records so it
+        # carries aigentrail.enforcement.decision - the marker the evaluator
+        # uses to stamp the resulting violation outcome=prevented.
+        self._enforced_decisions: dict[str, str] = {}
 
     def register_hooks(self, registry: HookRegistry) -> None:
         registry.add_callback(BeforeInvocationEvent, self.capture_invocation_start)
@@ -75,6 +80,7 @@ class GentrailGovernanceHook(HookProvider):
         agent_name = event.agent.name
 
         self._tool_call_count = 0
+        self._enforced_decisions = {}
         self._current_journal = self.ledger.create(agent_id, agent_name)
 
         user_msg = ""
@@ -246,6 +252,8 @@ class GentrailGovernanceHook(HookProvider):
                 rule = verdict.get("rule", "")
                 msg = verdict.get("message") or f"{decision} by policy {rule}".strip()
                 event.cancel_tool = msg
+                key = event.tool_use.get("toolUseId") or tool_name
+                self._enforced_decisions[key] = decision
                 logger.warning("[T4] %s tool %s (rule=%s): %s", decision, tool_name, rule, msg)
 
     def capture_tool_result(self, event: AfterToolCallEvent) -> None:
@@ -281,6 +289,7 @@ class GentrailGovernanceHook(HookProvider):
             ))
 
         if self._otel and self._invocation_span:
+            key = event.tool_use.get("toolUseId") or tool_name
             self._otel.record_tool_call(
                 self._invocation_span,
                 agent_id=agent_id,
@@ -289,6 +298,7 @@ class GentrailGovernanceHook(HookProvider):
                 args=json.dumps(tool_args if isinstance(tool_args, dict) else {})[:500],
                 result=result_str[:500],
                 duration_ms=latency_ms,
+                enforced_decision=self._enforced_decisions.pop(key, None),
             )
 
         self.events.append(AgentEvent(
