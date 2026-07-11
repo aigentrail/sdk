@@ -174,6 +174,7 @@ class GovernanceTracer:
         args: str,
         result: str,
         duration_ms: float | None,
+        enforced_decision: str | None = None,
     ) -> None:
         ctx = _trace_mod.set_span_in_context(parent)
         with self._tracer.start_as_current_span(name, context=ctx) as span:
@@ -188,6 +189,12 @@ class GovernanceTracer:
             span.set_attribute("output.value", self._value(result))
             if duration_ms is not None:
                 span.set_attribute("aigentrail.latency_ms", duration_ms)
+            # The pre-execution verdict that cancelled this call (BLOCK or
+            # GATE). Ingestion copies it onto the tool_call item and the
+            # evaluator stamps the matching violation outcome=prevented, so the
+            # dashboard reads the fire as enforcement working, not a fresh alarm.
+            if enforced_decision:
+                span.set_attribute("aigentrail.enforcement.decision", enforced_decision)
 
     def record_llm_call(
         self,

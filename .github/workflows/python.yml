@@ -16,8 +16,14 @@ jobs:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
       - run: uvx ruff check .
+      # The otel deps let the span-attribute tests execute for real; tests
+      # guard their own imports, so a bare `python3 tests/test_x.py` still
+      # works locally without them.
       - run: |
           for t in tests/test_*.py; do
             echo "== $t"
-            python3 "$t"
+            uv run --no-project \
+              --with "opentelemetry-sdk>=1.20" \
+              --with "opentelemetry-exporter-otlp-proto-http>=1.20" \
+              python "$t"
           done
