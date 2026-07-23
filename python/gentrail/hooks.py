@@ -241,20 +241,31 @@ class GentrailGovernanceHook(HookProvider):
         # Inline enforcement (opt-in): ask the backend before the tool runs and
         # stop it when policy says so. cancel_tool turns the call into an error
         # tool result, so the tool never executes and the agent sees the verdict.
-        # BLOCK is a hard stop. GATE means "needs human approval"; without an
-        # approval channel yet it also stops the call (block-pending-approval) -
-        # a real gate would pause and resume on approval (a follow-up).
+        # BLOCK is a hard stop. GATE holds the call for human approval: the hook
+        # pauses, polling the approval resource decide() handed back, and resumes
+        # the tool only if a human approves -- a denied, expired, or unanswered
+        # gate keeps it cancelled (fails closed).
         if self._enforcer is not None:
             tool_args = event.tool_use.get("input", {}) or {}
             verdict = self._enforcer.decide(tool_name, tool_args)
             decision = verdict.get("decision")
-            if decision in ("BLOCK", "GATE"):
-                rule = verdict.get("rule", "")
-                msg = verdict.get("message") or f"{decision} by policy {rule}".strip()
+            rule = verdict.get("rule", "")
+            msg = verdict.get("message") or f"{decision} by policy {rule}".strip()
+            key = event.tool_use.get("toolUseId") or tool_name
+            if decision == "BLOCK":
                 event.cancel_tool = msg
-                key = event.tool_use.get("toolUseId") or tool_name
-                self._enforced_decisions[key] = decision
-                logger.warning("[T4] %s tool %s (rule=%s): %s", decision, tool_name, rule, msg)
+                self._enforced_decisions[key] = "BLOCK"
+                logger.warning("[T4] BLOCK tool %s (rule=%s): %s", tool_name, rule, msg)
+            elif decision == "GATE":
+                status = self._enforcer.await_gate(verdict.get("approval") or {})
+                if status == "approved":
+                    logger.info(
+                        "[T4] GATE approved for tool %s (rule=%s); proceeding", tool_name, rule
+                    )
+                else:
+                    event.cancel_tool = f"{msg} (approval {status})"
+                    self._enforced_decisions[key] = "GATE"
+                    logger.warning("[T4] GATE %s for tool %s (rule=%s)", status, tool_name, rule)
 
     def capture_tool_result(self, event: AfterToolCallEvent) -> None:
         agent_id = event.agent.agent_id
