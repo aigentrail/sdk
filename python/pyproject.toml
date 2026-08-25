@@ -3,11 +3,13 @@ name = "gentrail"
 version = "0.5.0"
 description = "Gentrail SDK: governance hooks, inline policy enforcement, and telemetry capture for AI agents"
 readme = "README.md"
+license = {text = "Apache-2.0"}
 requires-python = ">=3.9"
 keywords = ["governance", "ai-agents", "compliance", "opentelemetry", "strands"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
     "Programming Language :: Python :: 3",
     "Topic :: System :: Monitoring",
 ]
