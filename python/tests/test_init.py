@@ -103,11 +103,9 @@ def test_attach_keeps_app_provider_and_carries_governance_spans():
         assert "app.after_shutdown" in names
 
 
-def test_auth_headers_default_to_basic_and_yield_to_otel_env():
+def test_auth_headers_default_to_bearer_and_yield_to_otel_env():
     with _env():
-        headers = _mod._auth_headers("sk-key")
-        assert headers is not None
-        assert headers["Authorization"].startswith("Basic ")
+        assert _mod._auth_headers("sk-key") == {"Authorization": "Bearer sk-key"}
     with _env(OTEL_EXPORTER_OTLP_HEADERS="Authorization=Bearer%20tok"):
         assert _mod._auth_headers("sk-key") is None
     with _env(OTEL_EXPORTER_OTLP_TRACES_HEADERS="x-org=acme"):
@@ -161,7 +159,7 @@ def test_init_hook_needs_strands():
 if __name__ == "__main__":
     test_fresh_provider_installed_when_none_exists()
     test_attach_keeps_app_provider_and_carries_governance_spans()
-    test_auth_headers_default_to_basic_and_yield_to_otel_env()
+    test_auth_headers_default_to_bearer_and_yield_to_otel_env()
     test_init_returns_handle_wired_from_env()
     test_init_hook_needs_strands()
     print("ok")

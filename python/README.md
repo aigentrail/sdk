@@ -69,6 +69,33 @@ Agent middleware wrapping every tool call, sync and async. Same verdicts: a
 blocked or unapproved call becomes an error `ToolMessage` and the tool never
 executes.
 
+## Bring your own telemetry
+
+Frameworks that emit OpenTelemetry GenAI telemetry natively (Strands with
+`strands-agents[otel]`, Google ADK, Pydantic AI, LangChain with
+`LANGSMITH_OTEL_ENABLED`, the Vercel AI SDK) do not need the SDK to build
+spans: the Gentrail backend ingests `gen_ai.*`, `ai.*`, and OpenInference
+telemetry directly. This is the recommended integration for those frameworks.
+What the SDK still adds is client-side PII redaction and export to Gentrail:
+
+```python
+import gentrail
+
+gentrail.instrument()
+```
+
+`instrument()` attaches a `GentrailSpanProcessor` to your application's
+`TracerProvider` (pass yours with `instrument(provider=...)`; a fresh one is
+installed only when none exists). The processor redacts PII from `gen_ai.*`,
+`ai.*`, and OpenInference input/output attributes before any value leaves the
+process, stamps `aigentrail.redaction.applied` on spans it changed, and ships
+them to the Gentrail collector over OTLP. Other exporters on the provider keep
+the raw spans. Without `GENTRAIL_API_KEY` it returns `None` and the app runs
+unchanged.
+
+Inline enforcement stays separate: add the enforcement adapter for your
+framework (above) to get BLOCK and GATE verdicts before a tool runs.
+
 ## Configuration
 
 All through environment variables:
@@ -77,7 +104,7 @@ All through environment variables:
 - `OTEL_EXPORTER_OTLP_ENDPOINT`: collector base URL, default
   `https://otel.gentrail.ai`.
 - `OTEL_EXPORTER_OTLP_HEADERS`: standard OTel header list; when set it replaces
-  the SDK's default Basic auth header.
+  the SDK's default `Authorization: Bearer <GENTRAIL_API_KEY>` header.
 - `GENTRAIL_DECIDE_ENDPOINT`: enables inline enforcement (see below).
 - `GENTRAIL_REDACT_PII`: set to `false` to disable client-side PII redaction.
 - `GENTRAIL_GATE_TIMEOUT_SECONDS`: how long a gated tool call waits for human
@@ -89,11 +116,13 @@ it; a fresh provider is installed only when none exists.
 
 ## PII redaction
 
-The OTLP exporter redacts high-confidence PII (emails, SSNs, credit cards, AWS
-keys) from span input and output values before they leave the process, replacing
-each with a typed placeholder like `[EMAIL]`, so the raw value never reaches the
-collector while the data class stays visible for governance. On by default; opt
-out with `GENTRAIL_REDACT_PII=false` or `create_governance_tracer(redact=False)`.
+The SDK redacts high-confidence PII (emails, SSNs, credit cards, AWS keys)
+from span input and output values before they leave the process, replacing each
+with a typed placeholder like `[EMAIL]`, so the raw value never reaches the
+collector while the data class stays visible for governance. This applies to
+spans the SDK builds and, via `GentrailSpanProcessor`, to `gen_ai.*`, `ai.*`,
+and OpenInference attributes on spans your framework emits itself. On by
+default; opt out with `GENTRAIL_REDACT_PII=false` or `instrument(redact=False)`.
 
 ## Inline enforcement (opt-in)
 
