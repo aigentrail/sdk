@@ -15,7 +15,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
-      - run: uvx ruff check .
+      - run: uvx ruff@0.16.3 check .
       # The otel deps let the span-attribute tests execute for real; tests
       # guard their own imports, so a bare `python3 tests/test_x.py` still
       # works locally without them.

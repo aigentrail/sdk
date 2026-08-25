@@ -135,6 +135,32 @@ def test_await_gate_fails_closed_when_unreachable():
     assert enf.await_gate({"status_url": "/x"}, timeout=1) == "timeout"
 
 
+def test_decide_sends_caller_identity_when_given():
+    port, captured = _serve_once({"decision": "ALLOW"})
+    enf = PolicyEnforcer(f"http://127.0.0.1:{port}", "sk-test-key")
+    enf.decide(
+        "run_sql",
+        {"sql": "SELECT 1"},
+        agent_id="agent-reporter",
+        invocation_id="0af7651916cd43dd8448eb211c80319c",
+        request_id="tooluse_abc123",
+    )
+    body = captured["body"]
+    assert body["agent_id"] == "agent-reporter"
+    assert body["invocation_id"] == "0af7651916cd43dd8448eb211c80319c"
+    assert body["request_id"] == "tooluse_abc123"
+
+
+def test_decide_omits_identity_fields_when_absent():
+    port, captured = _serve_once({"decision": "ALLOW"})
+    enf = PolicyEnforcer(f"http://127.0.0.1:{port}", "sk-test-key")
+    enf.decide("run_sql", {})
+    body = captured["body"]
+    assert "agent_id" not in body
+    assert "invocation_id" not in body
+    assert "request_id" not in body
+
+
 if __name__ == "__main__":
     test_block_verdict_with_auth_and_payload()
     test_fails_open_when_backend_unreachable()
@@ -144,4 +170,6 @@ if __name__ == "__main__":
     test_await_gate_returns_denied()
     test_await_gate_fails_closed_without_status_url()
     test_await_gate_fails_closed_when_unreachable()
+    test_decide_sends_caller_identity_when_given()
+    test_decide_omits_identity_fields_when_absent()
     print("ALL PASS")
