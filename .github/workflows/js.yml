@@ -1,0 +1,23 @@
+name: js
+
+on:
+  push:
+    branches: [main]
+    paths: ['js/**', '.github/workflows/js.yml']
+  pull_request:
+    paths: ['js/**', '.github/workflows/js.yml']
+
+defaults:
+  run:
+    working-directory: js/gentrail-ai
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+      - run: npm test
