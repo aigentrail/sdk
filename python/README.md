@@ -7,26 +7,46 @@ executes.
 A Go SDK with the same span shape lives in [`../go/`](../go/) (`go get
 github.com/aigentrail/sdk/go`).
 
-## Install
+## Quickstart
 
 ```bash
 pip install "gentrail[strands]"
+export GENTRAIL_API_KEY="sk-..."
 ```
 
-The `strands` extra pulls in the Strands hook integration. Omit it if you only
-use the event normalizer, evidence ledger, or OTLP exporter directly.
+```python
+import gentrail
+from strands import Agent
 
-## What it does
+g = gentrail.init()
+agent = Agent(model=model, tools=tools, hooks=[g.hook()])
+agent("Reconcile the Q3 invoices")
+```
 
-The SDK composes four pieces:
+That is the whole integration. `init()` reads the environment, builds the
+governance tracer and the policy enforcer, and `hook()` returns a Strands
+`HookProvider` that captures prompts, chain-of-thought, and tool calls, ships
+them over OTLP, registers the agent on its first invocation, and enforces
+verdicts before a tool runs. Use one `hook()` per agent. Whatever is not
+configured stays off: with no API key the agent still runs, capture-only.
 
-- `hooks.py` - a Strands `HookProvider` that intercepts every lifecycle event
-  (prompts, chain-of-thought, tool calls and results) and seals a per-invocation
-  decision journal.
-- `event_normalizer.py` - turns provider-specific events into one canonical
-  event type.
-- `evidence_ledger.py` - a local append-only audit log with integrity hashes.
-- `otel_exporter.py` - pushes the captured spans over OTLP.
+## Configuration
+
+All through environment variables:
+
+- `GENTRAIL_API_KEY`: enables OTLP export of governance spans.
+- `OTEL_EXPORTER_OTLP_ENDPOINT`: collector base URL, default
+  `https://otel.gentrail.ai`.
+- `OTEL_EXPORTER_OTLP_HEADERS`: standard OTel header list; when set it replaces
+  the SDK's default Basic auth header.
+- `GENTRAIL_DECIDE_ENDPOINT`: enables inline enforcement (see below).
+- `GENTRAIL_REDACT_PII`: set to `false` to disable client-side PII redaction.
+- `GENTRAIL_GATE_TIMEOUT_SECONDS`: how long a gated tool call waits for human
+  approval, default 120.
+
+If your application already configures an OpenTelemetry `TracerProvider`, the
+SDK attaches its exporter to it as an extra span processor instead of replacing
+it; a fresh provider is installed only when none exists.
 
 ## PII redaction
 
@@ -55,11 +75,25 @@ error tool result and the tool never runs). A `GATE` verdict also stops the call
 pending human approval. A backend error never breaks the agent: the call is
 allowed and enforcement is skipped for that step.
 
+## Advanced: raw capture surfaces
+
+`init()` and `hook()` compose lower-level pieces that remain importable for
+consumers that need them directly:
+
+- `event_normalizer.py`: the canonical `AgentEvent` type and the in-memory
+  `event_store`. The hook appends every lifecycle event here, including an
+  automatic `AGENT_REGISTERED` on the agent's first invocation.
+- `evidence_ledger.py`: a local append-only audit log with integrity hashes;
+  the hook seals one `DecisionJournal` per invocation.
+- `otel_exporter.py`: `create_governance_tracer()` / `get_governance_tracer()`
+  build the OTLP pipeline without the rest of the SDK.
+- `enforcement.py`: `PolicyEnforcer` is the raw decide/gate client.
+
 ## Develop
 
 ```bash
 uv sync --extra strands
 ruff check .
 python3 tests/test_enforcement.py
-python3 tests/test_redaction.py
+python3 tests/test_init.py
 ```

@@ -291,15 +291,15 @@ def create_governance_tracer(redact: bool | None = None) -> GovernanceTracer | N
         logger.warning("GENTRAIL_API_KEY set but opentelemetry packages not installed")
         return None
 
-    credentials = base64.b64encode(f"{api_key}:{api_key}".encode()).decode()
-    headers = {"Authorization": f"Basic {credentials}"}
     ca_cert = os.environ.get("OTEL_EXPORTER_OTLP_CERTIFICATE", "")
     insecure = os.environ.get("OTEL_EXPORTER_OTLP_INSECURE", "").lower() in ("true", "1", "yes")
 
     exporter_kwargs: dict[str, Any] = {
         "endpoint": f"{endpoint.rstrip('/')}/v1/traces",
-        "headers": headers,
     }
+    headers = _auth_headers(api_key)
+    if headers is not None:
+        exporter_kwargs["headers"] = headers
     if ca_cert:
         exporter_kwargs["certificate_file"] = ca_cert
 
@@ -309,13 +309,53 @@ def create_governance_tracer(redact: bool | None = None) -> GovernanceTracer | N
         # OTLPSpanExporter passes verify=_certificate_file to requests.post().
         # The constructor coerces False → True, so we override after creation.
         exporter._certificate_file = False
-    provider = _sdk_trace_mod.TracerProvider()
-    provider.add_span_processor(_batch_processor_mod.BatchSpanProcessor(exporter))
-    _trace_mod.set_tracer_provider(provider)
+    processor = _batch_processor_mod.BatchSpanProcessor(exporter)
+    provider, flush_target = _attach_or_install_provider(processor)
 
-    tracer = _trace_mod.get_tracer("aigentrail.governance")
-    logger.info("Governance OTel tracer initialized → %s", endpoint)
-    return GovernanceTracer(tracer, provider, redact=redact)
+    tracer = provider.get_tracer("aigentrail.governance")
+    logger.info("Governance OTel tracer initialized -> %s", endpoint)
+    return GovernanceTracer(tracer, flush_target, redact=redact)
+
+
+def _auth_headers(api_key: str) -> dict[str, str] | None:
+    """None when the standard OTel header env vars are set, so OTLPSpanExporter
+    parses them itself; otherwise the legacy Basic credential existing
+    deployments authenticate with."""
+    if os.environ.get("OTEL_EXPORTER_OTLP_TRACES_HEADERS") or os.environ.get(
+        "OTEL_EXPORTER_OTLP_HEADERS"
+    ):
+        return None
+    credentials = base64.b64encode(f"{api_key}:{api_key}".encode()).decode()
+    return {"Authorization": f"Basic {credentials}"}
+
+
+def _attach_or_install_provider(processor: Any) -> tuple[Any, Any]:
+    """Give the governance span processor a TracerProvider without clobbering one
+    the app already configured.
+
+    Returns (provider, flush_target). When the app owns the provider, the flush
+    target is our processor alone, so GovernanceTracer.shutdown() cannot tear
+    down the app's tracing.
+    """
+    existing = _trace_mod.get_tracer_provider()
+    no_real_provider = isinstance(
+        existing, (_trace_mod.ProxyTracerProvider, _trace_mod.NoOpTracerProvider)
+    )
+    if not no_real_provider and hasattr(existing, "add_span_processor"):
+        existing.add_span_processor(processor)
+        return existing, processor
+    if not no_real_provider:
+        logger.warning(
+            "global TracerProvider %s cannot accept span processors; using a private provider",
+            type(existing).__name__,
+        )
+        provider = _sdk_trace_mod.TracerProvider()
+        provider.add_span_processor(processor)
+        return provider, provider
+    provider = _sdk_trace_mod.TracerProvider()
+    provider.add_span_processor(processor)
+    _trace_mod.set_tracer_provider(provider)
+    return provider, provider
 
 
 def get_governance_tracer() -> GovernanceTracer | None:

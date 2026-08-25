@@ -1,4 +1,9 @@
-"""Gentrail SDK — governance hooks and telemetry capture for AI agents."""
+"""Gentrail SDK: governance hooks, inline policy enforcement, and telemetry
+capture for AI agents. Start with gentrail.init()."""
+
+from .enforcement import PolicyEnforcer
+from .init import Gentrail, init
+from .otel_exporter import GovernanceTracer, create_governance_tracer, get_governance_tracer
 
 from .event_normalizer import AgentEvent, EventStore, EventType, SourceTier, event_store
 from .evidence_ledger import (
@@ -8,7 +13,6 @@ from .evidence_ledger import (
     ToolCallRecord,
     evidence_ledger,
 )
-from .otel_exporter import GovernanceTracer, create_governance_tracer, get_governance_tracer
 
 # Strands HookProvider is optional: importing strands when it is not installed
 # would break SDK consumers that only need the OTLP exporter (e.g. policy_engine).
@@ -18,18 +22,21 @@ except ImportError:
     GentrailGovernanceHook = None  # type: ignore[assignment,misc]
 
 __all__ = [
-    "AgentEvent",
+    "init",
+    "Gentrail",
     "GentrailGovernanceHook",
+    "PolicyEnforcer",
+    "GovernanceTracer",
+    "create_governance_tracer",
+    "get_governance_tracer",
+    "AgentEvent",
     "DecisionJournal",
     "EventStore",
     "EventType",
     "EvidenceLedger",
-    "GovernanceTracer",
     "ModelCallRecord",
     "SourceTier",
     "ToolCallRecord",
-    "create_governance_tracer",
     "event_store",
     "evidence_ledger",
-    "get_governance_tracer",
 ]
