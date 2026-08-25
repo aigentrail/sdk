@@ -2,6 +2,7 @@
   "name": "@gentrail/ai",
   "version": "0.1.0",
   "description": "Gentrail inline policy enforcement for Vercel AI SDK tools",
+  "license": "Apache-2.0",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/aigentrail/sdk.git",
