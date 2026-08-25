@@ -4,6 +4,7 @@ capture for AI agents. Start with gentrail.init()."""
 from .enforcement import AsyncPolicyEnforcer, PolicyEnforcer
 from .init import Gentrail, init
 from .otel_exporter import GovernanceTracer, create_governance_tracer, get_governance_tracer
+from .processor import GentrailSpanProcessor, instrument
 
 from .event_normalizer import AgentEvent, EventStore, EventType, SourceTier, event_store
 from .evidence_ledger import (
@@ -23,8 +24,10 @@ except ImportError:
 
 __all__ = [
     "init",
+    "instrument",
     "Gentrail",
     "GentrailGovernanceHook",
+    "GentrailSpanProcessor",
     "AsyncPolicyEnforcer",
     "PolicyEnforcer",
     "GovernanceTracer",

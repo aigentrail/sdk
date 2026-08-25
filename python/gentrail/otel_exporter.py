@@ -7,7 +7,6 @@ OTEL_EXPORTER_OTLP_ENDPOINT.
 
 from __future__ import annotations
 
-import base64
 import logging
 import os
 import re
@@ -266,31 +265,56 @@ def create_governance_tracer(redact: bool | None = None) -> GovernanceTracer | N
     """Build a GovernanceTracer from env vars. Returns None if GENTRAIL_API_KEY is
     missing. PII redaction defaults on unless redact is passed or
     GENTRAIL_REDACT_PII=false."""
-    api_key = os.environ.get("GENTRAIL_API_KEY", "")
+    api_key = _api_key_from_env()
     if not api_key:
-        # Opting out by setting nothing stays silent, but half-configured
-        # environments must not fail into silent no-tracing: that failure mode
-        # cost a day of debugging when the aigentrail -> gentrail env rename
-        # left consumers exporting the old key name.
-        if os.environ.get("AIGENTRAIL_API_KEY"):
-            logger.warning(
-                "AIGENTRAIL_API_KEY is set but this SDK reads GENTRAIL_API_KEY; governance tracing disabled"
-            )
-        elif os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT"):
-            logger.warning(
-                "OTEL_EXPORTER_OTLP_ENDPOINT is set but GENTRAIL_API_KEY is not; governance tracing disabled"
-            )
         return None
 
     if redact is None:
-        redact = os.environ.get("GENTRAIL_REDACT_PII", "").lower() != "false"
+        redact = _redact_enabled_from_env()
 
-    endpoint = os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT", DEFAULT_ENDPOINT)
+    exporter = _build_otlp_exporter(api_key)
+    if exporter is None:
+        return None
 
+    processor = _batch_processor_mod.BatchSpanProcessor(exporter)
+    provider, flush_target = _attach_or_install_provider(processor)
+
+    tracer = provider.get_tracer("aigentrail.governance")
+    return GovernanceTracer(tracer, flush_target, redact=redact)
+
+
+def _api_key_from_env() -> str:
+    """GENTRAIL_API_KEY, or "" with a warning when the environment is
+    half-configured. Opting out by setting nothing stays silent, but a
+    half-configured environment must not fail into silent no-tracing: that
+    failure mode cost a day of debugging when the aigentrail -> gentrail env
+    rename left consumers exporting the old key name."""
+    api_key = os.environ.get("GENTRAIL_API_KEY", "")
+    if api_key:
+        return api_key
+    if os.environ.get("AIGENTRAIL_API_KEY"):
+        logger.warning(
+            "AIGENTRAIL_API_KEY is set but this SDK reads GENTRAIL_API_KEY; governance tracing disabled"
+        )
+    elif os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT"):
+        logger.warning(
+            "OTEL_EXPORTER_OTLP_ENDPOINT is set but GENTRAIL_API_KEY is not; governance tracing disabled"
+        )
+    return ""
+
+
+def _redact_enabled_from_env() -> bool:
+    return os.environ.get("GENTRAIL_REDACT_PII", "").lower() != "false"
+
+
+def _build_otlp_exporter(api_key: str) -> Any | None:
+    """An OTLPSpanExporter for the Gentrail collector, honoring the standard
+    OTEL_EXPORTER_OTLP_* env vars. None when opentelemetry is not installed."""
     if not _try_import_otel():
         logger.warning("GENTRAIL_API_KEY set but opentelemetry packages not installed")
         return None
 
+    endpoint = os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT", DEFAULT_ENDPOINT)
     ca_cert = os.environ.get("OTEL_EXPORTER_OTLP_CERTIFICATE", "")
     insecure = os.environ.get("OTEL_EXPORTER_OTLP_INSECURE", "").lower() in ("true", "1", "yes")
 
@@ -307,26 +331,20 @@ def create_governance_tracer(redact: bool | None = None) -> GovernanceTracer | N
 
     if insecure:
         # OTLPSpanExporter passes verify=_certificate_file to requests.post().
-        # The constructor coerces False → True, so we override after creation.
+        # The constructor coerces False to True, so we override after creation.
         exporter._certificate_file = False
-    processor = _batch_processor_mod.BatchSpanProcessor(exporter)
-    provider, flush_target = _attach_or_install_provider(processor)
-
-    tracer = provider.get_tracer("aigentrail.governance")
-    logger.info("Governance OTel tracer initialized -> %s", endpoint)
-    return GovernanceTracer(tracer, flush_target, redact=redact)
+    logger.info("Gentrail OTLP export -> %s", endpoint)
+    return exporter
 
 
 def _auth_headers(api_key: str) -> dict[str, str] | None:
     """None when the standard OTel header env vars are set, so OTLPSpanExporter
-    parses them itself; otherwise the legacy Basic credential existing
-    deployments authenticate with."""
+    parses them itself; otherwise Bearer auth with the API key."""
     if os.environ.get("OTEL_EXPORTER_OTLP_TRACES_HEADERS") or os.environ.get(
         "OTEL_EXPORTER_OTLP_HEADERS"
     ):
         return None
-    credentials = base64.b64encode(f"{api_key}:{api_key}".encode()).decode()
-    return {"Authorization": f"Basic {credentials}"}
+    return {"Authorization": f"Bearer {api_key}"}
 
 
 def _attach_or_install_provider(processor: Any) -> tuple[Any, Any]:
