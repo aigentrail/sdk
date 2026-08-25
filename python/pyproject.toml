@@ -1,14 +1,27 @@
 [project]
 name = "gentrail"
-version = "0.1.0"
-description = "Gentrail SDK — governance hooks and telemetry capture for AI agents"
+version = "0.4.0"
+description = "Gentrail SDK: governance hooks, inline policy enforcement, and telemetry capture for AI agents"
+readme = "README.md"
 requires-python = ">=3.9"
+keywords = ["governance", "ai-agents", "compliance", "opentelemetry", "strands"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Topic :: System :: Monitoring",
+]
 dependencies = [
     "pydantic>=2.0",
     "opentelemetry-api>=1.20.0",
     "opentelemetry-sdk>=1.20.0",
     "opentelemetry-exporter-otlp-proto-http>=1.20.0",
 ]
+
+[project.urls]
+Homepage = "https://gentrail.ai"
+Repository = "https://github.com/aigentrail/sdk"
+Issues = "https://github.com/aigentrail/sdk/issues"
 
 [project.optional-dependencies]
 strands = ["strands-agents>=0.1.0"]
