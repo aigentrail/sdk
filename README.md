@@ -7,3 +7,5 @@ traces from either runtime.
 
 - [`python/`](python/) is the Python SDK (`pip install "gentrail[strands]"`).
 - [`go/`](go/) is the Go SDK (`go get github.com/aigentrail/sdk/go`).
+- [`js/gentrail-ai/`](js/gentrail-ai/) is `@gentrail/ai`, inline enforcement
+  for Vercel AI SDK tools.
