@@ -66,6 +66,7 @@ class GentrailGovernanceHook(HookProvider):
         # carries aigentrail.enforcement.decision - the marker the evaluator
         # uses to stamp the resulting violation outcome=prevented.
         self._enforced_decisions: dict[str, str] = {}
+        self._registered_agent_ids: set[str] = set()
 
     def register_hooks(self, registry: HookRegistry) -> None:
         registry.add_callback(BeforeInvocationEvent, self.capture_invocation_start)
@@ -79,6 +80,7 @@ class GentrailGovernanceHook(HookProvider):
         agent_id = event.agent.agent_id
         agent_name = event.agent.name
 
+        self._register_agent_once(event.agent)
         self._tool_call_count = 0
         self._enforced_decisions = {}
         self._current_journal = self.ledger.create(agent_id, agent_name)
@@ -116,6 +118,33 @@ class GentrailGovernanceHook(HookProvider):
         ))
 
         logger.info(f"[T4] Invocation started: journal={self._current_journal.journal_id}")
+
+    def _register_agent_once(self, agent: Any) -> None:
+        """Emit AGENT_REGISTERED the first time this hook sees an agent_id, so
+        consumers no longer hand-write the registration event. Per-hook-instance
+        idempotence only: a consumer that still registers manually gets one
+        duplicate event in the in-memory store, which nothing dedups or asserts
+        on, and the OTLP export never reads AGENT_REGISTERED at all."""
+        agent_id = agent.agent_id
+        if agent_id in self._registered_agent_ids:
+            return
+        self._registered_agent_ids.add(agent_id)
+
+        payload: dict[str, Any] = {"agent_name": agent.name, "tier": "T4"}
+        tools = getattr(agent, "tool_names", None)
+        if tools:
+            payload["tools"] = list(tools)
+        model_config = getattr(getattr(agent, "model", None), "config", None)
+        if isinstance(model_config, dict) and model_config.get("model_id"):
+            payload["model"] = model_config["model_id"]
+
+        self.events.append(AgentEvent(
+            agent_id=agent_id,
+            agent_name=agent.name,
+            event_type=EventType.AGENT_REGISTERED,
+            source_tier=SourceTier.T4,
+            payload=payload,
+        ))
 
     def capture_prompt_and_context(self, event: BeforeModelCallEvent) -> None:
         agent_id = event.agent.agent_id
