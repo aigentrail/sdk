@@ -30,6 +30,45 @@ them over OTLP, registers the agent on its first invocation, and enforces
 verdicts before a tool runs. Use one `hook()` per agent. Whatever is not
 configured stays off: with no API key the agent still runs, capture-only.
 
+### OpenAI Agents SDK
+
+```bash
+pip install "gentrail[openai-agents]"
+```
+
+```python
+from agents import function_tool
+from gentrail.openai_agents import enforcement_guardrail
+
+@function_tool(tool_input_guardrails=[enforcement_guardrail()])
+def run_sql(database: str, sql: str) -> str: ...
+```
+
+A tool input guardrail that asks the decide endpoint before the tool runs.
+BLOCK rejects the call with the policy message; GATE holds it until a human
+approves in the Gentrail dashboard.
+
+### LangChain / LangGraph
+
+```bash
+pip install "gentrail[langchain]"
+```
+
+```python
+from langchain.agents import create_agent
+from gentrail.langchain import enforcement_middleware
+
+agent = create_agent(
+    model=model,
+    tools=tools,
+    middleware=[enforcement_middleware(agent_id="reporter")],
+)
+```
+
+Agent middleware wrapping every tool call, sync and async. Same verdicts: a
+blocked or unapproved call becomes an error `ToolMessage` and the tool never
+executes.
+
 ## Configuration
 
 All through environment variables:
@@ -87,7 +126,8 @@ consumers that need them directly:
   the hook seals one `DecisionJournal` per invocation.
 - `otel_exporter.py`: `create_governance_tracer()` / `get_governance_tracer()`
   build the OTLP pipeline without the rest of the SDK.
-- `enforcement.py`: `PolicyEnforcer` is the raw decide/gate client.
+- `enforcement.py`: `PolicyEnforcer` and its asyncio twin `AsyncPolicyEnforcer`
+  are the raw decide/gate clients.
 
 ## Develop
 

@@ -11,6 +11,7 @@ GENTRAIL_API_KEY are both set, so the default behaviour stays observe-only.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -113,16 +114,7 @@ class PolicyEnforcer:
         deadline = time.monotonic() + (self.gate_timeout if timeout is None else timeout)
         while True:
             try:
-                req = urllib.request.Request(
-                    poll_url,
-                    method="GET",
-                    headers={
-                        "Authorization": f"Bearer {self.api_key}",
-                        "User-Agent": _USER_AGENT,
-                    },
-                )
-                with urllib.request.urlopen(req, timeout=self.timeout) as resp:
-                    status = json.loads(resp.read().decode()).get("status", "pending")
+                status = self._poll_gate_once(poll_url)
             except Exception as e:
                 logger.warning("gate poll failed (%s); holding the gate closed", e)
                 return "timeout"
@@ -131,3 +123,177 @@ class PolicyEnforcer:
             if time.monotonic() >= deadline:
                 return "timeout"
             time.sleep(GATE_POLL_INTERVAL_SECONDS)
+
+    def _poll_gate_once(self, poll_url: str) -> str:
+        req = urllib.request.Request(
+            poll_url,
+            method="GET",
+            headers={
+                "Authorization": f"Bearer {self.api_key}",
+                "User-Agent": _USER_AGENT,
+            },
+        )
+        with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+            return json.loads(resp.read().decode()).get("status", "pending")
+
+
+class AsyncPolicyEnforcer:
+    """Async twin of PolicyEnforcer for asyncio-native callers.
+
+    Each HTTP round trip is the sync urllib call moved off the event loop with
+    asyncio.to_thread, so the base install still needs no HTTP client
+    dependency, while GATE polling waits with asyncio.sleep instead of
+    parking a thread. Semantics match the sync client exactly: decide fails
+    open, await_gate fails closed, same environment configuration.
+    """
+
+    def __init__(self, endpoint: str, api_key: str, timeout: float = 3.0):
+        self._sync = PolicyEnforcer(endpoint, api_key, timeout)
+
+    @classmethod
+    def from_env(cls) -> "AsyncPolicyEnforcer | None":
+        sync = PolicyEnforcer.from_env()
+        if sync is None:
+            return None
+        return cls(sync.base, sync.api_key, sync.timeout)
+
+    @property
+    def base(self) -> str:
+        return self._sync.base
+
+    @property
+    def api_key(self) -> str:
+        return self._sync.api_key
+
+    @property
+    def timeout(self) -> float:
+        return self._sync.timeout
+
+    @property
+    def gate_timeout(self) -> float:
+        return self._sync.gate_timeout
+
+    async def decide(
+        self,
+        tool_name: str,
+        tool_args: dict,
+        *,
+        agent_id: str = "",
+        invocation_id: str = "",
+        request_id: str = "",
+    ) -> dict:
+        return await asyncio.to_thread(
+            self._sync.decide,
+            tool_name,
+            tool_args,
+            agent_id=agent_id,
+            invocation_id=invocation_id,
+            request_id=request_id,
+        )
+
+    async def await_gate(self, approval: dict, *, timeout: float | None = None) -> str:
+        status_url = (approval or {}).get("status_url")
+        if not status_url:
+            return "timeout"
+        poll_url = self._sync.base + status_url
+        deadline = time.monotonic() + (
+            self._sync.gate_timeout if timeout is None else timeout
+        )
+        while True:
+            try:
+                status = await asyncio.to_thread(self._sync._poll_gate_once, poll_url)
+            except Exception as e:
+                logger.warning("gate poll failed (%s); holding the gate closed", e)
+                return "timeout"
+            if status != "pending":
+                return status
+            if time.monotonic() >= deadline:
+                return "timeout"
+            await asyncio.sleep(GATE_POLL_INTERVAL_SECONDS)
+
+
+def _verdict_message(verdict: dict) -> str:
+    decision = verdict.get("decision", "")
+    rule = verdict.get("rule", "")
+    return verdict.get("message") or f"{decision} by policy {rule}".strip()
+
+
+def enforce(
+    enforcer,
+    tool_name: str,
+    tool_args: dict,
+    *,
+    agent_id: str = "",
+    invocation_id: str = "",
+    request_id: str = "",
+) -> "tuple[bool, str]":
+    """One decide-and-gate cycle: (allowed, cancel_message).
+
+    ALLOW and an approved GATE return (True, ""); BLOCK and a denied, expired,
+    or unanswered GATE return (False, message) where the message is what the
+    model should see in place of the tool result. This is the framework-neutral
+    core the adapters share; enforcer is any object with the PolicyEnforcer
+    decide/await_gate surface.
+    """
+    verdict = enforcer.decide(
+        tool_name,
+        tool_args,
+        agent_id=agent_id,
+        invocation_id=invocation_id,
+        request_id=request_id,
+    )
+    decision = verdict.get("decision")
+    if decision == "BLOCK":
+        return False, _verdict_message(verdict)
+    if decision == "GATE":
+        status = enforcer.await_gate(verdict.get("approval") or {})
+        if status == "approved":
+            return True, ""
+        return False, f"{_verdict_message(verdict)} (approval {status})"
+    return True, ""
+
+
+async def enforce_async(
+    enforcer,
+    tool_name: str,
+    tool_args: dict,
+    *,
+    agent_id: str = "",
+    invocation_id: str = "",
+    request_id: str = "",
+) -> "tuple[bool, str]":
+    """enforce() for an AsyncPolicyEnforcer-shaped enforcer."""
+    verdict = await enforcer.decide(
+        tool_name,
+        tool_args,
+        agent_id=agent_id,
+        invocation_id=invocation_id,
+        request_id=request_id,
+    )
+    decision = verdict.get("decision")
+    if decision == "BLOCK":
+        return False, _verdict_message(verdict)
+    if decision == "GATE":
+        status = await enforcer.await_gate(verdict.get("approval") or {})
+        if status == "approved":
+            return True, ""
+        return False, f"{_verdict_message(verdict)} (approval {status})"
+    return True, ""
+
+
+def ambient_otel_trace_id() -> str:
+    """The current OpenTelemetry trace id as 32-char hex, "" when there is no
+    recording span or no opentelemetry install.
+
+    Sent as invocation_id so the backend can join the enforcement record to the
+    trace an OTel-instrumented framework run is already exporting.
+    """
+    try:
+        from opentelemetry import trace
+
+        ctx = trace.get_current_span().get_span_context()
+        if not ctx.is_valid:
+            return ""
+        return format(ctx.trace_id, "032x")
+    except Exception:
+        return ""

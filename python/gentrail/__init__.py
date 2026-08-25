@@ -1,7 +1,7 @@
 """Gentrail SDK: governance hooks, inline policy enforcement, and telemetry
 capture for AI agents. Start with gentrail.init()."""
 
-from .enforcement import PolicyEnforcer
+from .enforcement import AsyncPolicyEnforcer, PolicyEnforcer
 from .init import Gentrail, init
 from .otel_exporter import GovernanceTracer, create_governance_tracer, get_governance_tracer
 
@@ -25,6 +25,7 @@ __all__ = [
     "init",
     "Gentrail",
     "GentrailGovernanceHook",
+    "AsyncPolicyEnforcer",
     "PolicyEnforcer",
     "GovernanceTracer",
     "create_governance_tracer",
