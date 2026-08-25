@@ -24,7 +24,6 @@ from strands.hooks.events import (
     BeforeToolCallEvent,
 )
 
-from .event_normalizer import AgentEvent, EventStore, EventType, SourceTier, event_store
 from .evidence_ledger import (
     DecisionJournal,
     EvidenceLedger,
@@ -43,12 +42,10 @@ class GentrailGovernanceHook(HookProvider):
 
     def __init__(
         self,
-        event_store_instance: EventStore | None = None,
         ledger: EvidenceLedger | None = None,
         otel_tracer: GovernanceTracer | None = None,
         enforcer: "PolicyEnforcer | None" = None,
     ):
-        self.events = event_store_instance or event_store
         self.ledger = ledger or evidence_ledger
         self._otel = otel_tracer
         # Opt-in inline enforcement; None (the default) keeps capture-only behaviour.
@@ -66,7 +63,6 @@ class GentrailGovernanceHook(HookProvider):
         # carries aigentrail.enforcement.decision - the marker the evaluator
         # uses to stamp the resulting violation outcome=prevented.
         self._enforced_decisions: dict[str, str] = {}
-        self._registered_agent_ids: set[str] = set()
 
     def register_hooks(self, registry: HookRegistry) -> None:
         registry.add_callback(BeforeInvocationEvent, self.capture_invocation_start)
@@ -80,7 +76,6 @@ class GentrailGovernanceHook(HookProvider):
         agent_id = event.agent.agent_id
         agent_name = event.agent.name
 
-        self._register_agent_once(event.agent)
         self._tool_call_count = 0
         self._enforced_decisions = {}
         self._current_journal = self.ledger.create(agent_id, agent_name)
@@ -108,48 +103,9 @@ class GentrailGovernanceHook(HookProvider):
                 user_message=user_msg,
             )
 
-        self.events.append(AgentEvent(
-            agent_id=agent_id,
-            agent_name=agent_name,
-            event_type=EventType.INVOCATION_START,
-            source_tier=SourceTier.T4,
-            decision_journal_id=self._current_journal.journal_id,
-            payload={"user_message": user_msg[:300]},
-        ))
-
         logger.info(f"[T4] Invocation started: journal={self._current_journal.journal_id}")
 
-    def _register_agent_once(self, agent: Any) -> None:
-        """Emit AGENT_REGISTERED the first time this hook sees an agent_id, so
-        consumers no longer hand-write the registration event. Per-hook-instance
-        idempotence only: a consumer that still registers manually gets one
-        duplicate event in the in-memory store, which nothing dedups or asserts
-        on, and the OTLP export never reads AGENT_REGISTERED at all."""
-        agent_id = agent.agent_id
-        if agent_id in self._registered_agent_ids:
-            return
-        self._registered_agent_ids.add(agent_id)
-
-        payload: dict[str, Any] = {"agent_name": agent.name, "tier": "T4"}
-        tools = getattr(agent, "tool_names", None)
-        if tools:
-            payload["tools"] = list(tools)
-        model_config = getattr(getattr(agent, "model", None), "config", None)
-        if isinstance(model_config, dict) and model_config.get("model_id"):
-            payload["model"] = model_config["model_id"]
-
-        self.events.append(AgentEvent(
-            agent_id=agent_id,
-            agent_name=agent.name,
-            event_type=EventType.AGENT_REGISTERED,
-            source_tier=SourceTier.T4,
-            payload=payload,
-        ))
-
     def capture_prompt_and_context(self, event: BeforeModelCallEvent) -> None:
-        agent_id = event.agent.agent_id
-        agent_name = event.agent.name
-
         self._model_call_start = time.time()
 
         metrics = getattr(event.agent, "event_loop_metrics", None)
@@ -164,29 +120,15 @@ class GentrailGovernanceHook(HookProvider):
 
         self._system_prompt = getattr(event.agent, "system_prompt", "") or ""
 
-        self.events.append(AgentEvent(
-            agent_id=agent_id,
-            agent_name=agent_name,
-            event_type=EventType.PROMPT_CAPTURE,
-            source_tier=SourceTier.T4,
-            decision_journal_id=self._current_journal.journal_id if self._current_journal else None,
-            payload={"invocation_state_keys": list(event.invocation_state.keys())},
-        ))
-
     def capture_cot_reasoning(self, event: AfterModelCallEvent) -> None:
-        agent_id = event.agent.agent_id
-        agent_name = event.agent.name
-
         latency_ms = None
         if self._model_call_start:
             latency_ms = (time.time() - self._model_call_start) * 1000
             self._model_call_start = None
 
         cot_text = ""
-        stop_reason = ""
 
         if event.stop_response:
-            stop_reason = str(event.stop_response.stop_reason or "")
             message = event.stop_response.message
             if isinstance(message, dict):
                 content = message.get("content", [])
@@ -234,36 +176,11 @@ class GentrailGovernanceHook(HookProvider):
                 latency_ms=latency_ms,
             )
 
-        self.events.append(AgentEvent(
-            agent_id=agent_id,
-            agent_name=agent_name,
-            event_type=EventType.COT_REASONING,
-            source_tier=SourceTier.T4,
-            decision_journal_id=self._current_journal.journal_id if self._current_journal else None,
-            payload={
-                "cot_preview": cot_text[:300],
-                "stop_reason": stop_reason,
-                "latency_ms": latency_ms,
-            },
-        ))
-
     def capture_tool_call_start(self, event: BeforeToolCallEvent) -> None:
-        agent_id = event.agent.agent_id
-        agent_name = event.agent.name
-
         self._tool_call_count += 1
         self._tool_call_start = time.time()
 
         tool_name = event.tool_use.get("name", "unknown")
-
-        self.events.append(AgentEvent(
-            agent_id=agent_id,
-            agent_name=agent_name,
-            event_type=EventType.TOOL_CALL,
-            source_tier=SourceTier.T4,
-            decision_journal_id=self._current_journal.journal_id if self._current_journal else None,
-            payload={"tool_name": tool_name},
-        ))
 
         logger.info(f"[T4] Tool call: {tool_name}")
 
@@ -276,6 +193,7 @@ class GentrailGovernanceHook(HookProvider):
         # gate keeps it cancelled (fails closed).
         if self._enforcer is not None:
             tool_args = event.tool_use.get("input", {}) or {}
+            agent_id = event.agent.agent_id
             invocation_id = self._invocation_trace_id() or (
                 self._current_journal.journal_id if self._current_journal else ""
             )
@@ -364,25 +282,9 @@ class GentrailGovernanceHook(HookProvider):
                 enforced_decision=self._enforced_decisions.pop(key, None),
             )
 
-        self.events.append(AgentEvent(
-            agent_id=agent_id,
-            agent_name=agent_name,
-            event_type=EventType.TOOL_RESULT,
-            source_tier=SourceTier.T4,
-            decision_journal_id=self._current_journal.journal_id if self._current_journal else None,
-            payload={
-                "tool_name": tool_name,
-                "result_preview": result_str[:200],
-                "duration_ms": latency_ms,
-            },
-        ))
-
     def seal_decision_journal(self, event: AfterInvocationEvent) -> None:
         if not self._current_journal:
             return
-
-        agent_id = event.agent.agent_id
-        agent_name = event.agent.name
 
         final_response = ""
         if event.result:
@@ -405,20 +307,6 @@ class GentrailGovernanceHook(HookProvider):
             # the parent trace not yet in DDB when its tool_calls arrive.
             self._otel.force_flush()
             self._invocation_span = None
-
-        self.events.append(AgentEvent(
-            agent_id=agent_id,
-            agent_name=agent_name,
-            event_type=EventType.EVIDENCE_SEAL,
-            source_tier=SourceTier.T4,
-            decision_journal_id=self._current_journal.journal_id,
-            payload={
-                "journal_id": self._current_journal.journal_id,
-                "total_tokens": self._current_journal.total_tokens,
-                "tool_calls": self._tool_call_count,
-                "integrity_hash": integrity_hash,
-            },
-        ))
 
         logger.info(
             f"[T4] Journal sealed: {self._current_journal.journal_id} "
