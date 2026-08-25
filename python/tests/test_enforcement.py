@@ -161,6 +161,51 @@ def test_decide_omits_identity_fields_when_absent():
     assert "request_id" not in body
 
 
+class _FakeEnforcer:
+    def __init__(self, verdict, gate_status="approved"):
+        self.verdict = verdict
+        self.gate_status = gate_status
+        self.decide_kwargs = None
+
+    def decide(self, tool_name, tool_args, **kwargs):
+        self.decide_kwargs = {"tool_name": tool_name, "tool_args": tool_args, **kwargs}
+        return self.verdict
+
+    def await_gate(self, approval):
+        return self.gate_status
+
+
+def test_enforce_allow_forwards_identity():
+    fake = _FakeEnforcer({"decision": "ALLOW"})
+    allowed, message = _mod.enforce(
+        fake, "run_sql", {"sql": "SELECT 1"}, agent_id="a1", invocation_id="t1", request_id="r1"
+    )
+    assert (allowed, message) == (True, "")
+    assert fake.decide_kwargs["agent_id"] == "a1"
+    assert fake.decide_kwargs["invocation_id"] == "t1"
+    assert fake.decide_kwargs["request_id"] == "r1"
+
+
+def test_enforce_block_uses_fallback_message_without_backend_message():
+    fake = _FakeEnforcer({"decision": "BLOCK", "rule": "r1"})
+    assert _mod.enforce(fake, "run_sql", {}) == (False, "BLOCK by policy r1")
+
+
+def test_enforce_gate_denied_appends_status():
+    fake = _FakeEnforcer(
+        {"decision": "GATE", "rule": "r1", "message": "Hold on", "approval": {"status_url": "/x"}},
+        gate_status="denied",
+    )
+    assert _mod.enforce(fake, "run_sql", {}) == (False, "Hold on (approval denied)")
+
+
+def test_enforce_gate_approved_allows():
+    fake = _FakeEnforcer(
+        {"decision": "GATE", "message": "Hold on", "approval": {"status_url": "/x"}}
+    )
+    assert _mod.enforce(fake, "run_sql", {}) == (True, "")
+
+
 if __name__ == "__main__":
     test_block_verdict_with_auth_and_payload()
     test_fails_open_when_backend_unreachable()
@@ -172,4 +217,8 @@ if __name__ == "__main__":
     test_await_gate_fails_closed_when_unreachable()
     test_decide_sends_caller_identity_when_given()
     test_decide_omits_identity_fields_when_absent()
+    test_enforce_allow_forwards_identity()
+    test_enforce_block_uses_fallback_message_without_backend_message()
+    test_enforce_gate_denied_appends_status()
+    test_enforce_gate_approved_allows()
     print("ALL PASS")
