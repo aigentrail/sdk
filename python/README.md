@@ -148,9 +148,6 @@ allowed and enforcement is skipped for that step.
 `init()` and `hook()` compose lower-level pieces that remain importable for
 consumers that need them directly:
 
-- `event_normalizer.py`: the canonical `AgentEvent` type and the in-memory
-  `event_store`. The hook appends every lifecycle event here, including an
-  automatic `AGENT_REGISTERED` on the agent's first invocation.
 - `evidence_ledger.py`: a local append-only audit log with integrity hashes;
   the hook seals one `DecisionJournal` per invocation.
 - `otel_exporter.py`: `create_governance_tracer()` / `get_governance_tracer()`

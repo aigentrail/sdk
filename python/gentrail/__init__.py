@@ -6,7 +6,6 @@ from .init import Gentrail, init
 from .otel_exporter import GovernanceTracer, create_governance_tracer, get_governance_tracer
 from .processor import GentrailSpanProcessor, instrument
 
-from .event_normalizer import AgentEvent, EventStore, EventType, SourceTier, event_store
 from .evidence_ledger import (
     DecisionJournal,
     EvidenceLedger,
@@ -33,14 +32,9 @@ __all__ = [
     "GovernanceTracer",
     "create_governance_tracer",
     "get_governance_tracer",
-    "AgentEvent",
     "DecisionJournal",
-    "EventStore",
-    "EventType",
     "EvidenceLedger",
     "ModelCallRecord",
-    "SourceTier",
     "ToolCallRecord",
-    "event_store",
     "evidence_ledger",
 ]
