@@ -247,7 +247,17 @@ class GentrailGovernanceHook(HookProvider):
         # gate keeps it cancelled (fails closed).
         if self._enforcer is not None:
             tool_args = event.tool_use.get("input", {}) or {}
-            verdict = self._enforcer.decide(tool_name, tool_args)
+            invocation_id = self._invocation_trace_id() or (
+                self._current_journal.journal_id if self._current_journal else ""
+            )
+            verdict = self._enforcer.decide(
+                tool_name,
+                tool_args,
+                agent_id=agent_id,
+                invocation_id=invocation_id,
+                request_id=event.tool_use.get("toolUseId")
+                or f"{invocation_id}:{self._tool_call_count}",
+            )
             decision = verdict.get("decision")
             rule = verdict.get("rule", "")
             msg = verdict.get("message") or f"{decision} by policy {rule}".strip()
@@ -266,6 +276,19 @@ class GentrailGovernanceHook(HookProvider):
                     event.cancel_tool = f"{msg} (approval {status})"
                     self._enforced_decisions[key] = "GATE"
                     logger.warning("[T4] GATE %s for tool %s (rule=%s)", status, tool_name, rule)
+
+    def _invocation_trace_id(self) -> str:
+        """The invocation span's OTel trace id as 32-char hex, "" without tracing.
+
+        This is the id ingestion keys the trace on, so sending it with decide()
+        lets the backend join the enforcement record to the trace it prevented.
+        """
+        if self._invocation_span is None:
+            return ""
+        try:
+            return format(self._invocation_span.get_span_context().trace_id, "032x")
+        except Exception:
+            return ""
 
     def capture_tool_result(self, event: AfterToolCallEvent) -> None:
         agent_id = event.agent.agent_id

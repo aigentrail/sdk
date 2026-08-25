@@ -51,15 +51,35 @@ class PolicyEnforcer:
             return None
         return cls(endpoint, api_key)
 
-    def decide(self, tool_name: str, tool_args: dict) -> dict:
+    def decide(
+        self,
+        tool_name: str,
+        tool_args: dict,
+        *,
+        agent_id: str = "",
+        invocation_id: str = "",
+        request_id: str = "",
+    ) -> dict:
         """Return the backend verdict: {"decision": BLOCK|GATE|ALLOW, "rule", "message"}.
+
+        agent_id scopes agent-targeted and windowed rules to the caller;
+        invocation_id (the invocation's OTel trace id when tracing is on) lets
+        the backend join the enforcement record to the ingested trace and gives
+        a GATE approver context; request_id makes the backend's GATE/BLOCK
+        writes idempotent under retries. All three are optional: a bare call
+        still gets a verdict, only unscoped and unjoinable.
 
         Fails open - a backend error must never break the agent, only forgo
         enforcement for that call.
         """
-        body = json.dumps(
-            {"event_type": "tool_call", "tool_name": tool_name, "tool_args": tool_args}
-        ).encode()
+        payload = {"event_type": "tool_call", "tool_name": tool_name, "tool_args": tool_args}
+        if agent_id:
+            payload["agent_id"] = agent_id
+        if invocation_id:
+            payload["invocation_id"] = invocation_id
+        if request_id:
+            payload["request_id"] = request_id
+        body = json.dumps(payload).encode()
         req = urllib.request.Request(
             self.url,
             data=body,
