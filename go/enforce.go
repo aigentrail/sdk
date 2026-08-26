@@ -3,6 +3,8 @@ package gentrail
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"net/http"
 	"os"
@@ -128,6 +130,12 @@ func WithRequestID(id string) DecideOption {
 	return func(r *decideRequest) { r.RequestID = id }
 }
 
+func synthesizedRequestID() string {
+	var b [16]byte
+	_, _ = rand.Read(b[:])
+	return hex.EncodeToString(b[:])
+}
+
 // Decide returns the backend verdict for a proposed tool call. Fails open:
 // any transport or backend error returns ALLOW, because a backend outage must
 // never break the agent, only forgo enforcement for that call.
@@ -142,6 +150,11 @@ func (e *Enforcer) Decide(ctx context.Context, toolName string, toolArgs map[str
 	payload := decideRequest{EventType: "tool_call", ToolName: toolName, ToolArgs: toolArgs}
 	for _, opt := range opts {
 		opt(&payload)
+	}
+	if payload.RequestID == "" {
+		// The backend requires a retry identity; a synthesized one is unique
+		// so it never dedups a legitimate second call.
+		payload.RequestID = synthesizedRequestID()
 	}
 	body, err := json.Marshal(payload)
 	if err != nil {
