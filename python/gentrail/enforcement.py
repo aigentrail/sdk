@@ -17,6 +17,7 @@ import logging
 import os
 import time
 import urllib.request
+import uuid
 
 logger = logging.getLogger(__name__)
 
@@ -67,19 +68,23 @@ class PolicyEnforcer:
         invocation_id (the invocation's OTel trace id when tracing is on) lets
         the backend join the enforcement record to the ingested trace and gives
         a GATE approver context; request_id makes the backend's GATE/BLOCK
-        writes idempotent under retries. All three are optional: a bare call
-        still gets a verdict, only unscoped and unjoinable.
+        writes idempotent under retries. The backend requires a request_id, so
+        a caller without a framework call id gets a synthesized one (unique,
+        so it never dedups a legitimate second call).
 
         Fails open - a backend error must never break the agent, only forgo
         enforcement for that call.
         """
-        payload = {"event_type": "tool_call", "tool_name": tool_name, "tool_args": tool_args}
+        payload = {
+            "event_type": "tool_call",
+            "tool_name": tool_name,
+            "tool_args": tool_args,
+            "request_id": request_id or uuid.uuid4().hex,
+        }
         if agent_id:
             payload["agent_id"] = agent_id
         if invocation_id:
             payload["invocation_id"] = invocation_id
-        if request_id:
-            payload["request_id"] = request_id
         body = json.dumps(payload).encode()
         req = urllib.request.Request(
             self.url,

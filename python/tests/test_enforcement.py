@@ -158,7 +158,8 @@ def test_decide_omits_identity_fields_when_absent():
     body = captured["body"]
     assert "agent_id" not in body
     assert "invocation_id" not in body
-    assert "request_id" not in body
+    # The backend requires a retry identity, so a bare call synthesizes one.
+    assert body["request_id"]
 
 
 class _FakeEnforcer:

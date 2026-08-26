@@ -82,10 +82,14 @@ func TestDecideOmitsIdentityFieldsWhenAbsent(t *testing.T) {
 
 	newTestEnforcer(srv.URL).Decide(context.Background(), "run_sql", nil)
 
-	for _, k := range []string{"agent_id", "invocation_id", "request_id"} {
+	for _, k := range []string{"agent_id", "invocation_id"} {
 		if _, present := gotBody[k]; present {
 			t.Errorf("body must omit %q when not given", k)
 		}
+	}
+	// The backend requires a retry identity, so a bare call synthesizes one.
+	if id, _ := gotBody["request_id"].(string); id == "" {
+		t.Error("body must carry a synthesized request_id when none is given")
 	}
 	if _, present := gotBody["tool_args"]; !present {
 		t.Error("tool_args must be present even for a nil args map")
