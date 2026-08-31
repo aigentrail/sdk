@@ -300,3 +300,27 @@ test("tools without execute pass through unwrapped", () => {
   );
   assert.equal(guarded.render_chart, clientTool);
 });
+
+// The ambient lookup is best-effort: an app without @opentelemetry/api must
+// still get a verdict, just an unjoinable one the backend refuses to record.
+test("invocation_id is omitted when there is no ambient OTel trace", async () => {
+  const srv = await serve(() => ({ json: { decision: "ALLOW" } }));
+  try {
+    const { tools } = sqlTool();
+    const guarded = guardTools(tools, {
+      endpoint: srv.base,
+      apiKey: "sk-test",
+      agentId: "reporter",
+    });
+    await guarded.run_sql.execute({ sql: "SELECT 1" }, { toolCallId: "call-1" });
+    assert.deepEqual(srv.requests[0].json, {
+      event_type: "tool_call",
+      tool_name: "run_sql",
+      tool_args: { sql: "SELECT 1" },
+      agent_id: "reporter",
+      request_id: "call-1",
+    });
+  } finally {
+    await srv.close();
+  }
+});

@@ -65,12 +65,15 @@ class PolicyEnforcer:
         """Return the backend verdict: {"decision": BLOCK|GATE|ALLOW, "rule", "message"}.
 
         agent_id scopes agent-targeted and windowed rules to the caller;
-        invocation_id (the invocation's OTel trace id when tracing is on) lets
-        the backend join the enforcement record to the ingested trace and gives
-        a GATE approver context; request_id makes the backend's GATE/BLOCK
-        writes idempotent under retries. The backend requires a request_id, so
-        a caller without a framework call id gets a synthesized one (unique,
-        so it never dedups a legitimate second call).
+        invocation_id (the invocation's OTel trace id) lets the backend join
+        the enforcement record to the ingested trace and gives a GATE approver
+        context, and defaults to the ambient trace when a span is recording;
+        request_id makes the backend's GATE/BLOCK writes idempotent under
+        retries. The backend requires a request_id, so a caller without a
+        framework call id gets a synthesized one (unique, so it never dedups a
+        legitimate second call). It refuses to record a BLOCK/GATE with no
+        agent_id or invocation_id, since it could not be joined to its trace
+        and would double-count against the evaluator's own row.
 
         Fails open - a backend error must never break the agent, only forgo
         enforcement for that call.
@@ -83,6 +86,7 @@ class PolicyEnforcer:
         }
         if agent_id:
             payload["agent_id"] = agent_id
+        invocation_id = invocation_id or ambient_otel_trace_id()
         if invocation_id:
             payload["invocation_id"] = invocation_id
         body = json.dumps(payload).encode()

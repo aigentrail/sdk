@@ -162,6 +162,23 @@ def test_decide_omits_identity_fields_when_absent():
     assert body["request_id"]
 
 
+def test_decide_defaults_invocation_id_to_the_ambient_trace():
+    """The backend refuses a BLOCK/GATE record it cannot join to a trace, so a
+    caller already inside a recording span should not pass the id by hand."""
+    try:
+        from opentelemetry import trace
+        from opentelemetry.sdk.trace import TracerProvider
+    except ImportError:
+        return
+    trace.set_tracer_provider(TracerProvider())
+    port, captured = _serve_once({"decision": "ALLOW"})
+    enf = PolicyEnforcer(f"http://127.0.0.1:{port}", "sk-test-key")
+    with trace.get_tracer(__name__).start_as_current_span("invocation") as span:
+        want = format(span.get_span_context().trace_id, "032x")
+        enf.decide("run_sql", {})
+    assert captured["body"]["invocation_id"] == want
+
+
 class _FakeEnforcer:
     def __init__(self, verdict, gate_status="approved"):
         self.verdict = verdict
@@ -218,6 +235,7 @@ if __name__ == "__main__":
     test_await_gate_fails_closed_when_unreachable()
     test_decide_sends_caller_identity_when_given()
     test_decide_omits_identity_fields_when_absent()
+    test_decide_defaults_invocation_id_to_the_ambient_trace()
     test_enforce_allow_forwards_identity()
     test_enforce_block_uses_fallback_message_without_backend_message()
     test_enforce_gate_denied_appends_status()
