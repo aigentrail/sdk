@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"go.opentelemetry.io/otel/trace"
 )
 
 // Decision values the backend's decide endpoint returns for a proposed tool
@@ -130,6 +132,18 @@ func WithRequestID(id string) DecideOption {
 	return func(r *decideRequest) { r.RequestID = id }
 }
 
+// ambientTraceID is the current OpenTelemetry trace id as 32-char hex, "" when
+// no span is recording. Unlike the request id this cannot be synthesized: the
+// backend joins the enforcement record to the trace by this exact id, and a
+// made-up one would resolve to nothing and be refused all the same.
+func ambientTraceID(ctx context.Context) string {
+	sc := trace.SpanContextFromContext(ctx)
+	if !sc.HasTraceID() {
+		return ""
+	}
+	return sc.TraceID().String()
+}
+
 func synthesizedRequestID() string {
 	var b [16]byte
 	_, _ = rand.Read(b[:])
@@ -155,6 +169,9 @@ func (e *Enforcer) Decide(ctx context.Context, toolName string, toolArgs map[str
 		// The backend requires a retry identity; a synthesized one is unique
 		// so it never dedups a legitimate second call.
 		payload.RequestID = synthesizedRequestID()
+	}
+	if payload.InvocationID == "" {
+		payload.InvocationID = ambientTraceID(ctx)
 	}
 	body, err := json.Marshal(payload)
 	if err != nil {

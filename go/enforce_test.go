@@ -8,6 +8,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"go.opentelemetry.io/otel/trace"
 )
 
 func newTestEnforcer(url string) *Enforcer {
@@ -216,5 +218,51 @@ func TestGateTimeoutSecondsEnvOverride(t *testing.T) {
 	e := NewEnforcer("https://example.test", "sk")
 	if e.gateTimeout != 1500*time.Millisecond {
 		t.Errorf("gateTimeout = %v, want 1.5s", e.gateTimeout)
+	}
+}
+
+// The backend refuses a BLOCK/GATE record it cannot join to a trace, so a
+// caller already inside a recording span should not have to pass the id by
+// hand. It cannot be synthesized: only the real trace id resolves.
+func TestDecideFallsBackToTheAmbientTraceID(t *testing.T) {
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewDecoder(r.Body).Decode(&gotBody)
+		json.NewEncoder(w).Encode(Verdict{Decision: DecisionAllow})
+	}))
+	defer srv.Close()
+
+	traceID, _ := trace.TraceIDFromHex("0af7651916cd43dd8448eb211c80319c")
+	spanID, _ := trace.SpanIDFromHex("b7ad6b7169203331")
+	ctx := trace.ContextWithSpanContext(context.Background(), trace.NewSpanContext(trace.SpanContextConfig{
+		TraceID: traceID, SpanID: spanID,
+	}))
+
+	newTestEnforcer(srv.URL).Decide(ctx, "run_sql", nil)
+
+	if got := gotBody["invocation_id"]; got != "0af7651916cd43dd8448eb211c80319c" {
+		t.Errorf("invocation_id = %v, want the ambient trace id", got)
+	}
+}
+
+func TestDecideExplicitInvocationIDBeatsTheAmbientOne(t *testing.T) {
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewDecoder(r.Body).Decode(&gotBody)
+		json.NewEncoder(w).Encode(Verdict{Decision: DecisionAllow})
+	}))
+	defer srv.Close()
+
+	traceID, _ := trace.TraceIDFromHex("0af7651916cd43dd8448eb211c80319c")
+	spanID, _ := trace.SpanIDFromHex("b7ad6b7169203331")
+	ctx := trace.ContextWithSpanContext(context.Background(), trace.NewSpanContext(trace.SpanContextConfig{
+		TraceID: traceID, SpanID: spanID,
+	}))
+
+	newTestEnforcer(srv.URL).Decide(ctx, "run_sql", nil,
+		WithInvocationID("4bf92f3577b34da6a3ce929d0e0e4736"))
+
+	if got := gotBody["invocation_id"]; got != "4bf92f3577b34da6a3ce929d0e0e4736" {
+		t.Errorf("invocation_id = %v, want the explicit id", got)
 	}
 }

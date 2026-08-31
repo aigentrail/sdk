@@ -80,6 +80,31 @@ function resolveConfig(options: GuardOptions): Config | null {
   };
 }
 
+interface OtelApi {
+  trace: { getActiveSpan(): { spanContext(): { traceId?: string } } | undefined };
+}
+
+// The current OpenTelemetry trace id, or "" when the host app has no
+// @opentelemetry/api or no recording span. Resolved through a non-literal
+// specifier and typed structurally so the package keeps its zero dependencies.
+// The backend refuses a BLOCK/GATE record it cannot join to a trace, and only
+// the real trace id resolves, so unlike request_id this cannot be synthesized.
+const OTEL_API_MODULE = "@opentelemetry/api" as string;
+const INVALID_TRACE_ID = "00000000000000000000000000000000";
+let otelApi: OtelApi | null | undefined;
+
+async function ambientTraceId(): Promise<string> {
+  if (otelApi === undefined) {
+    try {
+      otelApi = (await import(OTEL_API_MODULE)) as OtelApi;
+    } catch {
+      otelApi = null;
+    }
+  }
+  const traceId = otelApi?.trace.getActiveSpan()?.spanContext().traceId;
+  return !traceId || traceId === INVALID_TRACE_ID ? "" : traceId;
+}
+
 async function decide(
   cfg: Config,
   toolName: string,
@@ -92,7 +117,8 @@ async function decide(
     tool_args: toolArgs ?? {},
   };
   if (cfg.agentId) payload.agent_id = cfg.agentId;
-  if (cfg.invocationId) payload.invocation_id = cfg.invocationId;
+  const invocationId = cfg.invocationId || (await ambientTraceId());
+  if (invocationId) payload.invocation_id = invocationId;
   if (requestId) payload.request_id = requestId;
   try {
     const res = await fetch(`${cfg.endpoint}/api/v1/decide`, {
