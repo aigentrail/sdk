@@ -1,6 +1,6 @@
 {
   "name": "@gentrail/ai",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Gentrail SDK: governance tracing, PII redaction, inline policy enforcement, and evidence capture for AI agents",
   "license": "Apache-2.0",
   "repository": {
@@ -23,7 +23,7 @@
     "data"
   ],
   "engines": {
-    "node": ">=20"
+    "node": ">=22"
   },
   "scripts": {
     "build": "tsc",
@@ -36,7 +36,9 @@
   "dependencies": {
     "@opentelemetry/api": "^1.9.1",
     "@opentelemetry/context-async-hooks": "^2.11.0",
+    "@opentelemetry/core": "^2.11.0",
     "@opentelemetry/exporter-trace-otlp-http": "^0.222.0",
-    "@opentelemetry/sdk-trace-base": "^2.11.0"
+    "@opentelemetry/sdk-trace-base": "^2.11.0",
+    "re2": "^1.26.1"
   }
 }

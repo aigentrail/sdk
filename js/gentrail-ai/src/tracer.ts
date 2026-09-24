@@ -10,6 +10,7 @@ import {
 } from "@opentelemetry/api";
 import { BasicTracerProvider, BatchSpanProcessor } from "@opentelemetry/sdk-trace-base";
 
+import { GenAISignalSpanExporter } from "./exportFilter.js";
 import {
   buildGentrailOtlpExporter,
   gentrailApiKeyFromEnv,
@@ -278,7 +279,7 @@ export function createGovernanceTracer(
   }
   const exporter = buildGentrailOtlpExporter(apiKey);
   const tracerProvider = new BasicTracerProvider({
-    spanProcessors: [new BatchSpanProcessor(exporter)],
+    spanProcessors: [new BatchSpanProcessor(new GenAISignalSpanExporter(exporter))],
   });
   return new GovernanceTracer({
     tracerProvider,

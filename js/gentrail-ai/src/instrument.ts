@@ -17,6 +17,7 @@ import {
   type SpanProcessor,
 } from "@opentelemetry/sdk-trace-base";
 
+import { GenAISignalSpanExporter } from "./exportFilter.js";
 import {
   buildGentrailOtlpExporter,
   gentrailApiKeyFromEnv,
@@ -118,7 +119,8 @@ export class GentrailSpanProcessor implements SpanProcessor {
   constructor(options: GentrailSpanProcessorOptions = {}) {
     const exporter = options.exporter ?? defaultGentrailExporter();
     const redact = options.redact ?? redactionEnabledFromEnv();
-    this.batch = new BatchSpanProcessor(redact ? new RedactingSpanExporter(exporter) : exporter);
+    const redactingOrRaw = redact ? new RedactingSpanExporter(exporter) : exporter;
+    this.batch = new BatchSpanProcessor(new GenAISignalSpanExporter(redactingOrRaw));
   }
 
   onStart(span: Span, parentContext: Context): void {

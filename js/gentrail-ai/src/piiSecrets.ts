@@ -1,6 +1,7 @@
 import { Buffer } from "node:buffer";
 
-import { goRegexToJs } from "./goRegex.js";
+import RE2 from "re2";
+
 import { isRecord, readVendoredJson, stringArray } from "./piiData.js";
 import type { NormalizedText, PIIClass, PIIFinding, TextSpan } from "./piiNormalize.js";
 
@@ -10,14 +11,14 @@ type AllowlistTargets = Readonly<Record<AllowlistTarget, string>>;
 
 interface SecretAllowlist {
   readonly target: AllowlistTarget;
-  readonly regexes: readonly RegExp[];
+  readonly regexes: readonly RE2[];
   readonly stopwords: readonly string[];
 }
 
 interface SecretRule {
   readonly ruleId: string;
   readonly piiClass: PIIClass;
-  readonly regex: RegExp;
+  readonly regex: RE2;
   readonly secretGroup: number;
   readonly entropyMin: number;
   readonly keywords: readonly string[];
@@ -39,14 +40,8 @@ export function secretRuleSet(): SecretRuleSet {
   return secretRuleSetCache;
 }
 
-export function compileGoRegex(pattern: string, extraFlags: string): RegExp {
-  const translated = goRegexToJs(pattern);
-  return new RegExp(translated.source, translated.flags + extraFlags);
-}
-
-function capturingGroupCount(regex: RegExp): number {
-  const probe = new RegExp(regex.source + "|", regex.flags.replace(/[gdy]/g, ""));
-  const match = probe.exec("");
+function capturingGroupCount(pattern: string): number {
+  const match = new RE2(pattern + "|").exec("");
   if (match === null) {
     throw new Error("an empty alternative always matches");
   }
@@ -61,9 +56,7 @@ function compileSecretAllowlist(source: unknown): SecretAllowlist {
   }
   return {
     target,
-    regexes: stringArray(allowlist.regexes, "allowlist regexes").map((pattern) =>
-      compileGoRegex(pattern, ""),
-    ),
+    regexes: stringArray(allowlist.regexes, "allowlist regexes").map((pattern) => new RE2(pattern)),
     stopwords: stringArray(allowlist.stopwords, "allowlist stopwords"),
   };
 }
@@ -85,8 +78,8 @@ function compileSecretRule(source: unknown): SecretRule {
   if (keywords.length === 0 || keywords.some((keyword) => keyword === "")) {
     throw new Error(`gitleaks rule ${ruleId} has no usable keywords to prefilter on`);
   }
-  const regex = compileGoRegex(source.regex, "gd");
-  if (secretGroup > capturingGroupCount(regex)) {
+  const regex = new RE2(source.regex, "gd");
+  if (secretGroup > capturingGroupCount(source.regex)) {
     throw new Error(`gitleaks rule ${ruleId} secret group out of range`);
   }
   const allowlists = Array.isArray(source.allowlists)
