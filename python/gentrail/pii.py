@@ -2,7 +2,7 @@
 
 Findings replace their span with a typed placeholder ([EMAIL], [SSN], ...) so
 the raw value never leaves the process while the data class stays visible to
-governance. tests/pii_conformance.json is the corpus shared with the server and
+governance. spec/pii_conformance.json is the corpus shared with the server and
 the Go SDK; the vendored rule data lives in gentrail/pii_data.
 """
 
@@ -11,12 +11,13 @@ from __future__ import annotations
 import bisect
 import json
 import math
-import re
 import unicodedata
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
-from typing import Callable, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
+
+import re2
 
 PII_CLASSES = ("AWS_KEY", "CREDIT_CARD", "EMAIL", "IBAN", "PHONE", "SECRET", "SSN")
 
@@ -140,7 +141,7 @@ def _normalize(original: str) -> _NormalizedText:
     return _NormalizedText(text, lower, tuple(origin), tuple(_numeric_spans(text)), *_placeholder_bounds(text))
 
 
-_PLACEHOLDER_RE = re.compile(r"\[(?:" + "|".join(PII_CLASSES) + r")\]")
+_PLACEHOLDER_RE = re2.compile(r"\[(?:" + "|".join(PII_CLASSES) + r")\]")
 
 
 def _placeholder_bounds(text: str) -> Tuple[Tuple[int, ...], Tuple[int, ...]]:
@@ -149,7 +150,7 @@ def _placeholder_bounds(text: str) -> Tuple[Tuple[int, ...], Tuple[int, ...]]:
 
 
 _ASCII_UPPER_TO_LOWER = str.maketrans("ABCDEFGHIJKLMNOPQRSTUVWXYZ", "abcdefghijklmnopqrstuvwxyz")
-_NON_ASCII_RE = re.compile(r"[^\x00-\x7f]+")
+_NON_ASCII_RE = re2.compile(r"[^\x00-\x7f]+")
 _DROPPED_CHARS = frozenset(chr(c) for c in (0x00AD, 0x200B, 0x200C, 0x200D, 0x2060, 0xFEFF))
 _DASH_CHARS = frozenset(chr(c) for c in (*range(0x2010, 0x2016), 0x2212, 0xFE58, 0xFE63, 0xFF0D))
 
@@ -164,7 +165,7 @@ def _fold_char(char: str) -> str:
     return unicodedata.normalize("NFKC", char)
 
 
-_NUMERIC_SPAN_RE = re.compile(r"[+(]?\d(?:[ .()\-]{0,2}\d)*", re.ASCII)
+_NUMERIC_SPAN_RE = re2.compile(r"[+(]?\d(?:[ .()\-]{0,2}\d)*")
 _NUMERIC_SPAN_DIGITS_MIN = 8
 
 
@@ -176,7 +177,7 @@ def _numeric_spans(text: str) -> List[Tuple[int, int]]:
     ]
 
 
-def _find_all_in_spans(pattern: "re.Pattern[str]", text: str, spans: Sequence[Tuple[int, int]]) -> List[Tuple[int, int]]:
+def _find_all_in_spans(pattern: Any, text: str, spans: Sequence[Tuple[int, int]]) -> List[Tuple[int, int]]:
     matches: List[Tuple[int, int]] = []
     for span_start, span_end in spans:
         for m in pattern.finditer(text, span_start, span_end):
@@ -184,7 +185,7 @@ def _find_all_in_spans(pattern: "re.Pattern[str]", text: str, spans: Sequence[Tu
     return matches
 
 
-_EMAIL_RE = re.compile(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}", re.ASCII)
+_EMAIL_RE = re2.compile(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}")
 _FILE_EXTENSIONS_THAT_ARE_NOT_TLDS = frozenset(
     "bmp css csv gif htm html ico jpeg jpg js json jsx md pdf png py svg tif tiff toml ts tsx txt webp xml yaml yml".split()
 )
@@ -221,8 +222,8 @@ def _email_spans(lower: str) -> List[Tuple[int, int]]:
     return spans
 
 
-_SSN_DASHED_RE = re.compile(r"\d{3}-\d{2}-\d{4}", re.ASCII)
-_SSN_UNDELIMITED_RE = re.compile(r"\d{3} \d{2} \d{4}|\d{9}", re.ASCII)
+_SSN_DASHED_RE = re2.compile(r"\d{3}-\d{2}-\d{4}")
+_SSN_UNDELIMITED_RE = re2.compile(r"\d{3} \d{2} \d{4}|\d{9}")
 _SSN_CONTEXT_WORDS = ("ssn", "social security", "ss#", "ss #")
 
 
@@ -256,7 +257,7 @@ def _valid_ssn(digits: str) -> bool:
     return group != "00" and serial != "0000"
 
 
-_DIGIT_RUN_RE = re.compile(r"\d(?:[ -]?\d)*", re.ASCII)
+_DIGIT_RUN_RE = re2.compile(r"\d(?:[ -]?\d)*")
 
 
 def _credit_card_findings(text: _NormalizedText) -> List[PIIFinding]:
@@ -345,7 +346,7 @@ def _iban_findings(text: _NormalizedText) -> List[PIIFinding]:
     return findings
 
 
-_IBAN_CANDIDATE_RE = re.compile(r"(?=[A-Z]{2}\d{2})", re.ASCII)
+_IBAN_CANDIDATE_RE = re2.compile(r"[A-Z]{2}\d{2}")
 
 
 def _iban_candidate_starts(text: str) -> List[int]:
@@ -380,8 +381,8 @@ def _iban_checksum_valid(compact: str) -> bool:
     return remainder == 1
 
 
-_PHONE_INTERNATIONAL_RE = re.compile(r"\+\d[\d ().-]{6,22}\d", re.ASCII)
-_PHONE_NATIONAL_RE = re.compile(r"\(?\d{3}\)?[ .-]?\d{3}[ .-]\d{4}", re.ASCII)
+_PHONE_INTERNATIONAL_RE = re2.compile(r"\+\d[\d ().-]{6,22}\d")
+_PHONE_NATIONAL_RE = re2.compile(r"\(?\d{3}\)?[ .-]?\d{3}[ .-]\d{4}")
 _PHONE_CONTEXT_WORDS = ("phone", "tel", "call", "mobile", "cell", "fax", "sms", "whatsapp", "text me", "contact")
 
 
@@ -401,7 +402,7 @@ def _phone_findings(text: _NormalizedText) -> List[PIIFinding]:
 @dataclass(frozen=True)
 class _SecretAllowlist:
     target: str
-    regexes: Tuple["re.Pattern[str]", ...]
+    regexes: Tuple[Any, ...]
     stopwords: Tuple[str, ...]
 
     def allows(self, targets: Dict[str, str]) -> bool:
@@ -415,7 +416,7 @@ class _SecretAllowlist:
 class _SecretRule:
     rule_id: str
     pii_class: str
-    regex: "re.Pattern[str]"
+    regex: Any
     secret_group: int
     entropy_min: float
     keywords: Tuple[str, ...]
@@ -429,66 +430,12 @@ class _SecretRuleSet:
     unique_keywords: Tuple[str, ...]
 
 
-def go_regex_to_python(pattern: str) -> str:
-    """Translate RE2 syntax gitleaks uses that Python's re rejects: mid-pattern
-    flag directives such as (?i) scope to the rest of their group in RE2 but
-    must lead the whole expression in Python, and \\z is spelled \\Z."""
-    out: List[str] = []
-    open_directives: List[List[str]] = [[]]
-    i, in_class = 0, False
-    while i < len(pattern):
-        char = pattern[i]
-        if char == "\\":
-            escaped = pattern[i : i + 2]
-            out.append("\\Z" if escaped == "\\z" else escaped)
-            i += 2
-            continue
-        if in_class:
-            if char == "]":
-                in_class = False
-            out.append("\\[" if char == "[" else char)
-            i += 1
-            continue
-        if char == "[":
-            in_class = True
-            out.append(char)
-            if pattern[i + 1 : i + 2] == "^":
-                out.append("^")
-                i += 1
-            if pattern[i + 1 : i + 2] == "]":
-                out.append("]")
-                i += 1
-            i += 1
-            continue
-        directive = re.match(r"\(\?([a-zA-Z]*(?:-[a-zA-Z]+)?)\)", pattern[i:])
-        if directive and i > 0:
-            flags = directive.group(1)
-            out.append("(?" + flags + ":")
-            open_directives[-1].append(flags)
-            i += directive.end()
-            continue
-        if char == "(":
-            open_directives.append([])
-        elif char == ")":
-            out.append(")" * len(open_directives.pop()))
-        elif char == "|" and open_directives[-1]:
-            out.append(")" * len(open_directives[-1]))
-            out.append("|")
-            out.extend("(?" + flags + ":" for flags in open_directives[-1])
-            i += 1
-            continue
-        out.append(char)
-        i += 1
-    out.append(")" * len(open_directives[-1]))
-    return "".join(out)
-
-
 def _compile_secret_allowlist(source: Dict[str, object]) -> _SecretAllowlist:
     target = source.get("regex_target") or "secret"
     assert target in ("secret", "match", "line"), f"unknown regex target {target!r}"
     return _SecretAllowlist(
         target=str(target),
-        regexes=tuple(re.compile(go_regex_to_python(p), re.ASCII) for p in source.get("regexes") or ()),
+        regexes=tuple(re2.compile(p) for p in source.get("regexes") or ()),
         stopwords=tuple(source.get("stopwords") or ()),
     )
 
@@ -501,7 +448,7 @@ def _secret_rules() -> _SecretRuleSet:
     unique_keywords: Dict[str, None] = {}
     for rule in source["rules"]:
         assert rule["keywords"], f"rule {rule['id']} has no keywords to prefilter on"
-        regex = re.compile(go_regex_to_python(rule["regex"]), re.ASCII)
+        regex = re2.compile(rule["regex"])
         assert rule["secret_group"] <= regex.groups, f"rule {rule['id']} secret group out of range"
         pii_class = "AWS_KEY" if rule["id"] == "aws-access-token" else "SECRET"
         allowlists = tuple(_compile_secret_allowlist(a) for a in rule["allowlists"])
@@ -529,24 +476,24 @@ def _secret_findings(text: _NormalizedText) -> List[PIIFinding]:
         if not any(keyword in present for keyword in rule.keywords):
             continue
         for m in rule.regex.finditer(text.text):
-            start, end = _secret_span(m, rule.secret_group)
+            start, end = _secret_span(m, rule.regex.groups, rule.secret_group)
             if start >= end or _secret_rejected(text.text, m, start, end, rule, rule_set.global_allowlist):
                 continue
             findings.append(text.finding(rule.pii_class, start, end, "gitleaks:" + rule.rule_id))
     return findings
 
 
-def _secret_span(m: "re.Match[str]", secret_group: int) -> Tuple[int, int]:
+def _secret_span(m: Any, group_count: int, secret_group: int) -> Tuple[int, int]:
     if secret_group > 0:
         return m.span(secret_group)
-    for group in range(1, (m.re.groups or 0) + 1):
+    for group in range(1, group_count + 1):
         start, end = m.span(group)
         if start >= 0 and end > start:
             return start, end
     return m.span(0)
 
 
-def _secret_rejected(text: str, m: "re.Match[str]", start: int, end: int, rule: _SecretRule, global_allowlist: _SecretAllowlist) -> bool:
+def _secret_rejected(text: str, m: Any, start: int, end: int, rule: _SecretRule, global_allowlist: _SecretAllowlist) -> bool:
     secret = text[start:end]
     if rule.entropy_min > 0 and _shannon_entropy(secret) <= rule.entropy_min:
         return True
