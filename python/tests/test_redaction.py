@@ -1,32 +1,44 @@
-"""Standalone tests for client-side PII redaction.
+"""Client-side PII redaction, checked against the corpus shared with the Gentrail
+server detector and the Go SDK (tests/pii_conformance.json).
 
-Loads otel_exporter.py directly so it runs without the SDK's OTel/pydantic deps
-(OTel is imported lazily, so the module loads on stdlib alone). Runnable as
-`python tests/test_redaction.py` or via pytest.
+Registers a stub `gentrail` package so the stdlib-only modules load without the
+SDK's pydantic/OTel deps. Runnable as `python tests/test_redaction.py` or via pytest.
 """
 
-import importlib.util
+import json
 import os
+import random
+import re
+import sys
+import types
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
-_spec = importlib.util.spec_from_file_location(
-    "otel_exporter", os.path.join(_HERE, "..", "gentrail", "otel_exporter.py")
-)
-_mod = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(_mod)
-redact_pii = _mod.redact_pii
-_luhn_valid = _mod._luhn_valid
-GovernanceTracer = _mod.GovernanceTracer
+_PKG_DIR = os.path.abspath(os.path.join(_HERE, "..", "gentrail"))
+if "gentrail" not in sys.modules:
+    _pkg = types.ModuleType("gentrail")
+    _pkg.__path__ = [_PKG_DIR]
+    sys.modules["gentrail"] = _pkg
+
+from gentrail import otel_exporter as _otel  # noqa: E402
+from gentrail import pii as _pii  # noqa: E402
+
+redact_pii = _otel.redact_pii
+GovernanceTracer = _otel.GovernanceTracer
 
 
 def test_redact_pii():
     cases = {
         "reach me at jane.doe@example.com please": "reach me at [EMAIL] please",
         "SSN 123-45-6789 on file": "SSN [SSN] on file",
-        "key AKIAIOSFODNN7EXAMPLE leaked": "key [AWS_KEY] leaked",
+        "SSN 123456789 on file": "SSN [SSN] on file",
+        "key AKIAZ4QXN7P2LRT5WVKB leaked": "key [AWS_KEY] leaked",
         "card 4111111111111111 charged": "card [CREDIT_CARD] charged",
         "card 4111 1111 1111 1111 charged": "card [CREDIT_CARD] charged",
         "amex 378282246310005 ok": "amex [CREDIT_CARD] ok",
+        "pay DE89370400440532013000 today": "pay [IBAN] today",
+        "phone 555-123-4567": "phone [PHONE]",
+        "token ghp_R8x2mQ9vL4kT7nB1cZ5wY3pH6jD0fG2sA9eK": "token [SECRET]",
+        '{"email":"a@b.co","ssn":"111-22-3333"}': '{"email":"[EMAIL]","ssn":"[SSN]"}',
         "a@b.com and 123-45-6789": "[EMAIL] and [SSN]",
         "just a normal sentence with 42 items": "just a normal sentence with 42 items",
         "": "",
@@ -36,22 +48,95 @@ def test_redact_pii():
         assert got == want, f"redact_pii({raw!r}) = {got!r}, want {want!r}"
 
 
-def test_redact_leaves_non_luhn():
-    # A 16-digit number that fails Luhn is not a card and must survive.
+def test_redact_leaves_look_alikes():
     for s in [
         "order 4111111111111112 shipped",
         "ref 1234567890123456 pending",
-        "phone 555-123-4567",
+        "ref 555-123-4567",
         "id 12345",
+        "icon@2x.png",
+        "api_key = $API_KEY",
+        "key AKIAIOSFODNN7EXAMPLE",
     ]:
-        assert redact_pii(s) == s, f"redacted a non-card: {s!r} -> {redact_pii(s)!r}"
+        assert redact_pii(s) == s, f"redacted a look-alike: {s!r} -> {redact_pii(s)!r}"
+
+
+_PLACEHOLDER_RE = re.compile(r"\[(AWS_KEY|CREDIT_CARD|EMAIL|IBAN|PHONE|SECRET|SSN)\]")
+
+
+def test_redaction_conforms_to_gentrail_corpus():
+    with open(os.path.join(_HERE, "pii_conformance.json"), encoding="utf-8") as f:
+        corpus = json.load(f)
+    assert tuple(corpus["classes"]) == _pii.PII_CLASSES, f"corpus classes {corpus['classes']} vs SDK {_pii.PII_CLASSES}"
+    assert corpus["cases"], "corpus has no cases"
+    failures = []
+    for case in corpus["cases"]:
+        found = set()
+        for field in case["fields"]:
+            redacted = redact_pii(field)
+            if not case["want"] and redacted != field:
+                failures.append(f"{case['name']}: {field!r} -> {redacted!r}, want unchanged")
+            found.update(_PLACEHOLDER_RE.findall(redacted))
+        if sorted(found) != case["want"]:
+            failures.append(f"{case['name']}: placeholders {sorted(found)}, want {case['want']}")
+    assert not failures, "\n".join(failures)
+
+
+def test_redaction_leaves_nothing_detectable():
+    for field in [
+        "0@0.AA+000000000000000",
+        "ssn 123-45-6789 and a@b.com 4111111111111111",
+        "phone 555-123-4567 api_key = \"q8Zr4TmN2vX7pL1kW9sB\"",
+    ]:
+        redacted = redact_pii(field)
+        leftover = _pii.pii_findings(redacted)
+        assert not leftover, f"redact_pii({field!r}) = {redacted!r} still has {leftover}"
+
+
+def test_randomized_fields_redact_to_a_fixpoint():
+    rng = random.Random(20260923)
+    alphabet = "0123456789 -+().@AKIAZ_ssnphoneapi_key=\"[]\n" + chr(0x2011) + chr(0xFF11) + chr(0x200B)
+    for _ in range(3000):
+        field = "".join(rng.choice(alphabet) for _ in range(rng.randint(0, 60)))
+        for finding in _pii.pii_findings(field):
+            assert 0 <= finding.start < finding.end <= len(field), f"{finding} outside {field!r}"
+        redacted = redact_pii(field)
+        leftover = _pii.pii_findings(redacted)
+        assert not leftover, f"redact_pii({field!r}) = {redacted!r} still has {leftover}"
+
+
+def test_go_regex_to_python_scopes_mid_pattern_flags():
+    cases = {
+        r"(?i)abc": r"(?i)abc",
+        r"ab(?i)cd": r"ab(?i:cd)",
+        r"(x(?i)y)z": r"(x(?i:y))z",
+        r"a(?i)b|c": r"a(?i:b)|(?i:c)",
+        r"[(?i)]x": r"[(?i)]x",
+        r"end\z": r"end\Z",
+        r"[[a]": r"[\[a]",
+    }
+    for source, want in cases.items():
+        got = _pii.go_regex_to_python(source)
+        assert got == want, f"go_regex_to_python({source!r}) = {got!r}, want {want!r}"
+
+
+def test_vendored_secret_rules_compile():
+    rule_set = _pii._secret_rules()
+    assert len(rule_set.rules) >= 200, f"compiled {len(rule_set.rules)} rules"
+    assert rule_set.global_allowlist.regexes, "global allowlist has no regexes"
+
+
+def test_vendored_iban_registry_loads():
+    lengths = _pii._iban_length_by_country()
+    assert len(lengths) >= 80
+    assert lengths["DE"] == 22 and lengths["NO"] == 15
 
 
 def test_luhn_valid():
     for s in ["4111111111111111", "4111 1111 1111 1111", "378282246310005", "5500005555555559"]:
-        assert _luhn_valid(s), f"luhn should accept {s!r}"
+        assert _pii._luhn_valid(s), f"luhn should accept {s!r}"
     for s in ["4111111111111112", "1234567890123456", "12345", "", "not a number"]:
-        assert not _luhn_valid(s), f"luhn should reject {s!r}"
+        assert not _pii._luhn_valid(s), f"luhn should reject {s!r}"
 
 
 class _FakeSpan:

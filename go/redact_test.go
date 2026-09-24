@@ -2,57 +2,102 @@ package gentrail
 
 import (
 	"context"
+	"encoding/json"
+	"os"
+	"regexp"
+	"slices"
+	"sort"
 	"testing"
 
 	"go.opentelemetry.io/otel/attribute"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 )
 
-func TestRedactString(t *testing.T) {
+func TestRedactPII(t *testing.T) {
 	cases := []struct{ in, want string }{
 		{"reach me at jane.doe@example.com please", "reach me at [EMAIL] please"},
 		{"SSN 123-45-6789 on file", "SSN [SSN] on file"},
-		{"key AKIAIOSFODNN7EXAMPLE leaked", "key [AWS_KEY] leaked"},
+		{"SSN 123456789 on file", "SSN [SSN] on file"},
+		{"key AKIAZ4QXN7P2LRT5WVKB leaked", "key [AWS_KEY] leaked"},
 		{"card 4111111111111111 charged", "card [CREDIT_CARD] charged"},
 		{"card 4111 1111 1111 1111 charged", "card [CREDIT_CARD] charged"},
 		{"amex 378282246310005 ok", "amex [CREDIT_CARD] ok"},
+		{"pay DE89370400440532013000 today", "pay [IBAN] today"},
+		{"phone 555-123-4567", "phone [PHONE]"},
+		{"token ghp_R8x2mQ9vL4kT7nB1cZ5wY3pH6jD0fG2sA9eK", "token [SECRET]"},
 		{`{"email":"a@b.co","ssn":"111-22-3333"}`, `{"email":"[EMAIL]","ssn":"[SSN]"}`},
 		{"a@b.com and 123-45-6789", "[EMAIL] and [SSN]"},
 		{"just a normal sentence with 42 items", "just a normal sentence with 42 items"},
 		{"", ""},
 	}
 	for _, c := range cases {
-		if got := redactString(c.in); got != c.want {
-			t.Errorf("redactString(%q) = %q, want %q", c.in, got, c.want)
+		if got := redactPII(c.in); got != c.want {
+			t.Errorf("redactPII(%q) = %q, want %q", c.in, got, c.want)
 		}
 	}
 }
 
-// A 16-digit number that fails Luhn is not a card and must survive: Luhn is what
-// keeps random order and account numbers from being redacted.
-func TestRedactStringLeavesNonLuhn(t *testing.T) {
+func TestRedactPIILeavesLookAlikes(t *testing.T) {
 	for _, s := range []string{
 		"order 4111111111111112 shipped",
 		"ref 1234567890123456 pending",
-		"phone 555-123-4567",
+		"ref 555-123-4567",
 		"id 12345",
+		"icon@2x.png",
+		"api_key = $API_KEY",
+		"key AKIAIOSFODNN7EXAMPLE",
 	} {
-		if got := redactString(s); got != s {
-			t.Errorf("redactString(%q) redacted a non-card to %q", s, got)
+		if got := redactPII(s); got != s {
+			t.Errorf("redactPII(%q) redacted a look-alike to %q", s, got)
 		}
 	}
 }
 
-func TestLuhnValid(t *testing.T) {
-	for _, s := range []string{"4111111111111111", "4111 1111 1111 1111", "378282246310005", "5500005555555559"} {
-		if !luhnValid(s) {
-			t.Errorf("luhnValid(%q) = false, want true", s)
-		}
+var placeholderTokenRe = regexp.MustCompile(`\[(AWS_KEY|CREDIT_CARD|EMAIL|IBAN|PHONE|SECRET|SSN)\]`)
+
+func TestRedactPIIConformsToGentrailCorpus(t *testing.T) {
+	raw, err := os.ReadFile("pii_conformance.json")
+	if err != nil {
+		t.Fatalf("read corpus: %v", err)
 	}
-	for _, s := range []string{"4111111111111112", "1234567890123456", "12345", "", "not a number"} {
-		if luhnValid(s) {
-			t.Errorf("luhnValid(%q) = true, want false", s)
-		}
+	var corpus struct {
+		Classes []string `json:"classes"`
+		Cases   []struct {
+			Name   string   `json:"name"`
+			Fields []string `json:"fields"`
+			Want   []string `json:"want"`
+		} `json:"cases"`
+	}
+	if err := json.Unmarshal(raw, &corpus); err != nil {
+		t.Fatalf("unmarshal corpus: %v", err)
+	}
+	if len(corpus.Cases) == 0 {
+		t.Fatal("corpus has no cases")
+	}
+	if want := []string{"AWS_KEY", "CREDIT_CARD", "EMAIL", "IBAN", "PHONE", "SECRET", "SSN"}; !slices.Equal(corpus.Classes, want) {
+		t.Fatalf("corpus classes %v, SDK placeholders cover %v", corpus.Classes, want)
+	}
+	for _, c := range corpus.Cases {
+		t.Run(c.Name, func(t *testing.T) {
+			found := map[string]bool{}
+			for _, field := range c.Fields {
+				redacted := redactPII(field)
+				if len(c.Want) == 0 && redacted != field {
+					t.Errorf("redactPII(%q) = %q, want unchanged", field, redacted)
+				}
+				for _, m := range placeholderTokenRe.FindAllStringSubmatch(redacted, -1) {
+					found[m[1]] = true
+				}
+			}
+			got := make([]string, 0, len(found))
+			for class := range found {
+				got = append(got, class)
+			}
+			sort.Strings(got)
+			if !slices.Equal(got, c.Want) {
+				t.Errorf("placeholders after redaction %v, want %v", got, c.Want)
+			}
+		})
 	}
 }
 

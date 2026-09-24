@@ -5,16 +5,18 @@ Loads otel_exporter.py directly so it runs without the SDK's OTel/pydantic deps
 `python tests/test_env_gate.py` or via pytest.
 """
 
-import importlib.util
 import logging
 import os
+import sys
+import types
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
-_spec = importlib.util.spec_from_file_location(
-    "otel_exporter", os.path.join(_HERE, "..", "gentrail", "otel_exporter.py")
-)
-_mod = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(_mod)
+_PKG_DIR = os.path.abspath(os.path.join(_HERE, "..", "gentrail"))
+if "gentrail" not in sys.modules:
+    _pkg = types.ModuleType("gentrail")
+    _pkg.__path__ = [_PKG_DIR]
+    sys.modules["gentrail"] = _pkg
+from gentrail import otel_exporter as _mod  # noqa: E402
 
 _ENV_KEYS = (
     "GENTRAIL_API_KEY",

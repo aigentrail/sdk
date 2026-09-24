@@ -116,13 +116,17 @@ it; a fresh provider is installed only when none exists.
 
 ## PII redaction
 
-The SDK redacts high-confidence PII (emails, SSNs, credit cards, AWS keys)
-from span input and output values before they leave the process, replacing each
-with a typed placeholder like `[EMAIL]`, so the raw value never reaches the
-collector while the data class stays visible for governance. This applies to
-spans the SDK builds and, via `GentrailSpanProcessor`, to `gen_ai.*`, `ai.*`,
-and OpenInference attributes on spans your framework emits itself. On by
-default; opt out with `GENTRAIL_REDACT_PII=false` or `instrument(redact=False)`.
+The SDK redacts PII from span input and output values before they leave the
+process, replacing each value with a typed placeholder: `[EMAIL]`, `[SSN]`,
+`[CREDIT_CARD]`, `[IBAN]`, `[PHONE]`, `[AWS_KEY]`, or `[SECRET]`. Numbers are
+validated (Luhn, SSN area rules, IBAN mod-97) so order ids and look-alikes
+survive, and secrets are found with the vendored gitleaks default rules. The raw
+value never reaches the collector while the data class stays visible for
+governance. The detector matches Gentrail's server-side one, pinned by the
+shared corpus in `tests/pii_conformance.json`. This applies to spans the SDK
+builds and, via `GentrailSpanProcessor`, to `gen_ai.*`, `ai.*`, and
+OpenInference attributes on spans your framework emits itself. On by default;
+opt out with `GENTRAIL_REDACT_PII=false` or `instrument(redact=False)`.
 
 ## Inline enforcement (opt-in)
 
