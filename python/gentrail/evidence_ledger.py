@@ -1,4 +1,4 @@
-"""Decision journal — sealed evidence packages for compliance."""
+"""Decision journal: sealed evidence packages for compliance."""
 
 from __future__ import annotations
 
@@ -8,6 +8,8 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 
 from pydantic import BaseModel, Field
+
+from .canonical_json import canonical_json
 
 
 class ToolCallRecord(BaseModel):
@@ -39,12 +41,55 @@ class DecisionJournal(BaseModel):
     sealed: bool = False
     integrity_hash: Optional[str] = None
 
-    def seal(self) -> str:
-        self.completed_at = datetime.now(timezone.utc)
+    def seal(self, now: Optional[datetime] = None) -> str:
+        self.completed_at = now or datetime.now(timezone.utc)
         self.sealed = True
-        data = self.model_dump_json(exclude={"integrity_hash"})
-        self.integrity_hash = hashlib.sha256(data.encode()).hexdigest()
+        self.integrity_hash = journal_integrity_hash(self)
         return self.integrity_hash
+
+
+def journal_canonical_document(journal: DecisionJournal) -> dict[str, Any]:
+    return {
+        "journal_id": journal.journal_id,
+        "agent_id": journal.agent_id,
+        "agent_name": journal.agent_name,
+        "started_at": _utc_millis(journal.started_at),
+        "completed_at": _utc_millis(journal.completed_at) if journal.completed_at else None,
+        "user_message": journal.user_message,
+        "final_response": journal.final_response,
+        "model_calls": [
+            {
+                "model_id": call.model_id,
+                "prompt_preview": call.prompt_preview,
+                "cot_reasoning": call.cot_reasoning,
+                "token_usage": dict(call.token_usage),
+                "latency_ms": call.latency_ms,
+            }
+            for call in journal.model_calls
+        ],
+        "tool_calls": [
+            {
+                "tool_name": call.tool_name,
+                "tool_args": call.tool_args,
+                "result": call.result,
+                "duration_ms": call.duration_ms,
+            }
+            for call in journal.tool_calls
+        ],
+        "total_tokens": journal.total_tokens,
+        "sealed": journal.sealed,
+    }
+
+
+def journal_integrity_hash(journal: DecisionJournal) -> str:
+    canonical = canonical_json(journal_canonical_document(journal))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _utc_millis(moment: datetime) -> str:
+    assert moment.tzinfo is not None, "journal timestamps must be timezone-aware"
+    utc = moment.astimezone(timezone.utc)
+    return utc.strftime("%Y-%m-%dT%H:%M:%S.") + f"{utc.microsecond // 1000:03d}Z"
 
 
 class EvidenceLedger:

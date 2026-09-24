@@ -1,0 +1,11 @@
+[
+ {"name": "allow", "verdict": {"decision": "ALLOW"}, "gate_status": null, "allowed": true, "message": ""},
+ {"name": "missing decision is allowed", "verdict": {}, "gate_status": null, "allowed": true, "message": ""},
+ {"name": "unknown decision is allowed", "verdict": {"decision": "SHADOW", "rule": "r"}, "gate_status": null, "allowed": true, "message": ""},
+ {"name": "block with message", "verdict": {"decision": "BLOCK", "rule": "no-prod-deletes", "message": "Deleting production data is blocked."}, "gate_status": null, "allowed": false, "message": "Deleting production data is blocked."},
+ {"name": "block without message", "verdict": {"decision": "BLOCK", "rule": "no-prod-deletes"}, "gate_status": null, "allowed": false, "message": "BLOCK by policy no-prod-deletes"},
+ {"name": "gate approved", "verdict": {"decision": "GATE", "rule": "wire-approval", "message": "Wires need approval.", "approval": {"status_url": "/api/v1/approvals/1"}}, "gate_status": "approved", "allowed": true, "message": ""},
+ {"name": "gate denied", "verdict": {"decision": "GATE", "rule": "wire-approval", "message": "Wires need approval.", "approval": {"status_url": "/api/v1/approvals/1"}}, "gate_status": "denied", "allowed": false, "message": "Wires need approval. (approval denied)"},
+ {"name": "gate expired", "verdict": {"decision": "GATE", "rule": "wire-approval", "approval": {"status_url": "/api/v1/approvals/1"}}, "gate_status": "expired", "allowed": false, "message": "GATE by policy wire-approval (approval expired)"},
+ {"name": "gate without status url fails closed", "verdict": {"decision": "GATE", "rule": "wire-approval"}, "gate_status": null, "allowed": false, "message": "GATE by policy wire-approval (approval timeout)"}
+]
