@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 
+import RE2 from "re2";
+
 import { isRecord, readVendoredJson } from "./piiData.js";
 import {
   countAsciiDigits,
@@ -9,20 +11,20 @@ import {
   type TextSpan,
 } from "./piiNormalize.js";
 
-const EMAIL = /[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}/g;
+const EMAIL = new RE2("[A-Za-z0-9._%+\\-]+@[A-Za-z0-9.\\-]+\\.[A-Za-z]{2,}", "g");
 const FILE_EXTENSIONS_THAT_ARE_NOT_TLDS = new Set(
   "bmp css csv gif htm html ico jpeg jpg js json jsx md pdf png py svg tif tiff toml ts tsx txt webp xml yaml yml".split(
     " ",
   ),
 );
-const SSN_DASHED = /[0-9]{3}-[0-9]{2}-[0-9]{4}/g;
-const SSN_UNDELIMITED = /[0-9]{3} [0-9]{2} [0-9]{4}|[0-9]{9}/g;
+const SSN_DASHED = new RE2("[0-9]{3}-[0-9]{2}-[0-9]{4}", "g");
+const SSN_UNDELIMITED = new RE2("[0-9]{3} [0-9]{2} [0-9]{4}|[0-9]{9}", "g");
 const SSN_CONTEXT_WORDS = ["ssn", "social security", "ss#", "ss #"];
-const DIGIT_RUN = /[0-9](?:[ -]?[0-9])*/g;
+const DIGIT_RUN = new RE2("[0-9](?:[ -]?[0-9])*", "g");
 const CARD_DIGITS_MIN = 13;
 const CARD_DIGITS_MAX = 19;
-const PHONE_INTERNATIONAL = /\+[0-9][0-9 ().-]{6,22}[0-9]/g;
-const PHONE_NATIONAL = /\(?[0-9]{3}\)?[ .-]?[0-9]{3}[ .-][0-9]{4}/g;
+const PHONE_INTERNATIONAL = new RE2("\\+[0-9][0-9 ().-]{6,22}[0-9]", "g");
+const PHONE_NATIONAL = new RE2("\\(?[0-9]{3}\\)?[ .-]?[0-9]{3}[ .-][0-9]{4}", "g");
 const PHONE_DIGITS_MIN = 8;
 const PHONE_DIGITS_MAX = 15;
 const PHONE_CONTEXT_WORDS = [

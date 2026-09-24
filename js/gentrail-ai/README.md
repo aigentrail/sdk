@@ -5,7 +5,12 @@ redaction, inline policy enforcement, and evidence capture. Feature parity with
 the Gentrail Python and Go SDKs; spans, redaction, journal hashes, and
 enforcement verdicts are pinned by the same shared specs.
 
-Requires Node.js 20 or newer.
+Requires Node.js 22 or newer. PII detection runs on RE2 through the `re2`
+native addon, which ships prebuilt binaries for Linux (glibc and musl), macOS,
+and Windows on x64 and arm64; other platforms build it from source. The addon
+installs through an npm install script, so if your npm or CI blocks install
+scripts, allow it for `re2` (for example `npm install-scripts approve re2` on
+npm 11).
 
 ## Quickstart
 
@@ -192,6 +197,18 @@ instrument();
 
 `instrument()` returns `null` without `GENTRAIL_API_KEY`.
 
+### Only GenAI spans leave the process
+
+Every Gentrail export path, the governance tracer and `GentrailSpanProcessor`
+alike, with redaction on or off, drops spans that carry no GenAI signal, so an
+app's HTTP and database spans never reach Gentrail. A span is exported when at
+least one attribute key starts with `gen_ai.`, `ai.`, `llm.`, `openinference.`,
+or `aigentrail.`, or equals `session.id`, `agent.name`, or `tool.name`. The
+check runs on the span's own attributes before redaction, so the
+`aigentrail.redaction.applied` stamp never admits a span. `carriesGenAISignal`
+and `GenAISignalSpanExporter` are exported for custom pipelines. The governance
+tracer keeps its own private provider and never touches the global one.
+
 ## PII redaction
 
 ```ts
@@ -209,6 +226,12 @@ threshold, and allowlists), and `SSN`. Text is normalized first (zero-width
 characters dropped, Unicode dashes and spaces folded, NFKC), and finding offsets
 point into the original string. The gitleaks rules (MIT, see
 `data/gitleaks_LICENSE`) and the IBAN registry ship in `data/`.
+
+Every pattern that scans untrusted text (the gitleaks rules and allowlists and
+the detectors' own patterns) runs on RE2, not the backtracking JavaScript
+engine, so scan time is linear in the field length and no crafted input can
+stall redaction. The gitleaks patterns compile unmodified in their Go syntax,
+matching the Go and Python SDKs.
 
 ## Evidence ledger
 

@@ -83,7 +83,10 @@ processor, err := gentrail.Instrument(provider)
 an app-owned provider, configured like `New`. Spans from other GenAI
 instrumentation ship to Gentrail with PII redacted from every `gen_ai.*`,
 `ai.*`, `input.*`, and `output.*` string attribute; redacted spans carry
-`aigentrail.redaction.applied=true`. The provider's other exporters still see
+`aigentrail.redaction.applied=true`. Spans without a GenAI signal (no
+`gen_ai.*`, `ai.*`, `llm.*`, `openinference.*`, `aigentrail.*`, `session.id`,
+`agent.name`, or `tool.name` attribute) are never exported, so database and HTTP
+spans stay in the process. The provider's other exporters still see
 the raw span.
 
 ## Enforcement

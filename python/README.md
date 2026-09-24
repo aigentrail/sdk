@@ -89,9 +89,14 @@ gentrail.instrument()
 installed only when none exists). The processor redacts PII from `gen_ai.*`,
 `ai.*`, and OpenInference input/output attributes before any value leaves the
 process, stamps `aigentrail.redaction.applied` on spans it changed, and ships
-them to the Gentrail collector over OTLP. Other exporters on the provider keep
-the raw spans. Without `GENTRAIL_API_KEY` it returns `None` and the app runs
-unchanged.
+them to the Gentrail collector over OTLP. Spans without a GenAI signal (your
+database and HTTP spans) are dropped rather than exported. Other exporters on
+the provider keep the raw spans. Without `GENTRAIL_API_KEY` it returns `None`
+and the app runs unchanged.
+
+The governance tracer behind `init()` never touches your provider: it runs on
+its own, so your spans cannot reach Gentrail through it, and its spans still
+join your trace through the shared OpenTelemetry context.
 
 Inline enforcement stays separate: add the enforcement adapter for your
 framework (above) to get BLOCK and GATE verdicts before a tool runs.
@@ -117,13 +122,14 @@ it; a fresh provider is installed only when none exists.
 ## PII redaction
 
 The SDK redacts PII from span input and output values before they leave the
-process, replacing each value with a typed placeholder: `[EMAIL]`, `[SSN]`,
+process, scanning with RE2 (`google-re2`) so detection is linear-time in the
+input, replacing each value with a typed placeholder: `[EMAIL]`, `[SSN]`,
 `[CREDIT_CARD]`, `[IBAN]`, `[PHONE]`, `[AWS_KEY]`, or `[SECRET]`. Numbers are
 validated (Luhn, SSN area rules, IBAN mod-97) so order ids and look-alikes
 survive, and secrets are found with the vendored gitleaks default rules. The raw
 value never reaches the collector while the data class stays visible for
 governance. The detector matches Gentrail's server-side one, pinned by the
-shared corpus in `tests/pii_conformance.json`. This applies to spans the SDK
+shared corpus in `spec/pii_conformance.json`. This applies to spans the SDK
 builds and, via `GentrailSpanProcessor`, to `gen_ai.*`, `ai.*`, and
 OpenInference attributes on spans your framework emits itself. On by default;
 opt out with `GENTRAIL_REDACT_PII=false` or `instrument(redact=False)`.

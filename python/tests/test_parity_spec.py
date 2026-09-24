@@ -23,6 +23,7 @@ if "gentrail" not in sys.modules:
     sys.modules["gentrail"] = _pkg
 
 from gentrail import enforcement as _enforcement  # noqa: E402
+from gentrail import export_filter as _export_filter  # noqa: E402
 from gentrail import otel_exporter as _otel  # noqa: E402
 from gentrail.canonical_json import canonical_json  # noqa: E402
 from gentrail.evidence_ledger import (  # noqa: E402
@@ -200,6 +201,18 @@ def test_httpx_transport_records_model_calls():
     assert [call["llm.model_name"] for call in model_calls] == ["api.example.com", "api.example.com"]
     assert [call["input.value"] for call in model_calls] == ["POST /v1/chat", "GET /v1/models"]
     assert [inv["aigentrail.invocation.status"] for inv in invocations] == ["ok", "http_503"]
+
+
+def test_export_filter_lists_match_spec():
+    spec = _spec("spans.json")["export_filter"]
+    assert list(_export_filter.GENAI_SIGNAL_ATTRIBUTE_PREFIXES) == spec["attribute_prefixes"]
+    assert sorted(_export_filter.GENAI_SIGNAL_ATTRIBUTE_KEYS) == sorted(spec["attribute_keys"])
+
+
+def test_export_filter_matches_shared_vectors():
+    for vector in _spec("export_filter_vectors.json"):
+        got = _export_filter.carries_genai_signal(vector["attributes"].keys())
+        assert got == vector["exported"], f"{vector['name']}: exported={got}"
 
 
 if __name__ == "__main__":

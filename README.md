@@ -33,6 +33,18 @@ read: the PII redaction corpus, decision-journal hash vectors (SHA-256 over RFC
 attributes. The PII detector's rule data is vendored byte-identically into each
 SDK by `scripts/sync-pii-data.sh`, and CI checks the copies match.
 
+Two guarantees hold in every SDK:
+
+- PII detection runs on RE2, so scanning is linear-time in the input and a
+  crafted tool result cannot stall the agent (`google-re2` in Python, `re2` in
+  TypeScript, the standard library in Go).
+- Only spans Gentrail ingests leave the process. The governance tracer runs on
+  a private provider, and every export path drops spans without a GenAI signal
+  (`spec/spans.json` `export_filter`), so an app's HTTP and database spans are
+  never sent.
+
+Requirements: Python 3.10+, Go 1.25+, Node 22+.
+
 ## Configuration
 
 All SDKs read the same environment variables:

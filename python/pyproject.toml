@@ -1,10 +1,10 @@
 [project]
 name = "gentrail"
-version = "0.6.0"
+version = "0.7.0"
 description = "Gentrail SDK: governance hooks, inline policy enforcement, and telemetry capture for AI agents"
 readme = "README.md"
 license = {text = "Apache-2.0"}
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 keywords = ["governance", "ai-agents", "compliance", "opentelemetry", "strands"]
 classifiers = [
     "Development Status :: 4 - Beta",
@@ -14,6 +14,7 @@ classifiers = [
     "Topic :: System :: Monitoring",
 ]
 dependencies = [
+    "google-re2>=1.1",
     "pydantic>=2.0",
     "opentelemetry-api>=1.20.0",
     "opentelemetry-sdk>=1.20.0",

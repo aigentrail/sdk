@@ -9,7 +9,12 @@ export {
   type PolicyEnforcerOptions,
   type Verdict,
 } from "./enforcement.js";
-export { goRegexToJs, type TranslatedRegex } from "./goRegex.js";
+export {
+  carriesGenAISignal,
+  GENAI_SIGNAL_ATTRIBUTE_KEYS,
+  GENAI_SIGNAL_ATTRIBUTE_PREFIXES,
+  GenAISignalSpanExporter,
+} from "./exportFilter.js";
 export { GentrailPolicyError, guardTools, type GuardOptions } from "./guard.js";
 export { init, type Gentrail } from "./init.js";
 export {

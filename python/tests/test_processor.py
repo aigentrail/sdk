@@ -101,12 +101,11 @@ def test_recognized_attrs_leave_pipeline_redacted():
     assert attrs["aigentrail.redaction.applied"] is True
 
 
-def test_unrecognized_attrs_pass_through_unstamped():
-    provider, memory = _pipeline()
-    _emit(provider, {"db.statement": "SELECT owner FROM t WHERE email='jane@acme.com'"})
-    attrs = dict(memory.get_finished_spans()[0].attributes)
-    assert attrs["db.statement"] == "SELECT owner FROM t WHERE email='jane@acme.com'"
-    assert "aigentrail.redaction.applied" not in attrs
+def test_non_genai_spans_never_leave_the_process():
+    for redact in (True, False):
+        provider, memory = _pipeline(redact=redact)
+        _emit(provider, {"db.statement": "SELECT owner FROM t WHERE email='jane@acme.com'"})
+        assert memory.get_finished_spans() == (), f"redact={redact}: a database span was exported"
 
 
 def test_clean_recognized_attrs_are_not_stamped():
@@ -130,7 +129,7 @@ def test_other_processors_on_the_provider_keep_raw_values():
     provider, gentrail_memory = _pipeline(
         extra_processor=SimpleSpanProcessor(app_memory)
     )
-    _emit(provider, {"output.value": "card 4111111111111111 charged"})
+    _emit(provider, {"openinference.span.kind": "LLM", "output.value": "card 4111111111111111 charged"})
     raw = dict(app_memory.get_finished_spans()[0].attributes)
     redacted = dict(gentrail_memory.get_finished_spans()[0].attributes)
     assert raw["output.value"] == "card 4111111111111111 charged"
@@ -162,7 +161,7 @@ def test_instrument_without_api_key_is_a_noop():
 
 if __name__ == "__main__":
     test_recognized_attrs_leave_pipeline_redacted()
-    test_unrecognized_attrs_pass_through_unstamped()
+    test_non_genai_spans_never_leave_the_process()
     test_clean_recognized_attrs_are_not_stamped()
     test_sequence_values_redacted_per_element()
     test_other_processors_on_the_provider_keep_raw_values()

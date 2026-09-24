@@ -1,5 +1,5 @@
 """Client-side PII redaction, checked against the corpus shared with the Gentrail
-server detector and the Go SDK (tests/pii_conformance.json).
+server detector and the Go SDK (spec/pii_conformance.json).
 
 Registers a stub `gentrail` package so the stdlib-only modules load without the
 SDK's pydantic/OTel deps. Runnable as `python tests/test_redaction.py` or via pytest.
@@ -10,6 +10,7 @@ import os
 import random
 import re
 import sys
+import time
 import types
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
@@ -106,19 +107,26 @@ def test_randomized_fields_redact_to_a_fixpoint():
         assert not leftover, f"redact_pii({field!r}) = {redacted!r} still has {leftover}"
 
 
-def test_go_regex_to_python_scopes_mid_pattern_flags():
-    cases = {
-        r"(?i)abc": r"(?i)abc",
-        r"ab(?i)cd": r"ab(?i:cd)",
-        r"(x(?i)y)z": r"(x(?i:y))z",
-        r"a(?i)b|c": r"a(?i:b)|(?i:c)",
-        r"[(?i)]x": r"[(?i)]x",
-        r"end\z": r"end\Z",
-        r"[[a]": r"[\[a]",
-    }
-    for source, want in cases.items():
-        got = _pii.go_regex_to_python(source)
-        assert got == want, f"go_regex_to_python({source!r}) = {got!r}, want {want!r}"
+def test_secret_scan_is_linear_time_on_adversarial_input():
+    fillers = ["0", "a", "a.", "a-", "a ", "aA0"]
+    started = time.perf_counter()
+    for rule in _pii._secret_rules().rules:
+        keyword = rule.keywords[0]
+        for filler in fillers:
+            run = filler * (100_000 // len(filler))
+            for text in (keyword + " = " + run, keyword + run, run + keyword):
+                for _ in rule.regex.finditer(text):
+                    pass
+    elapsed = time.perf_counter() - started
+    assert elapsed < 10, f"adversarial sweep took {elapsed:.1f}s; a backtracking engine is back"
+
+
+def test_redacting_a_megabyte_of_digits_is_fast():
+    field = "cohere api_key = " + "0" * 1_000_000
+    started = time.perf_counter()
+    redact_pii(field)
+    elapsed = time.perf_counter() - started
+    assert elapsed < 2, f"redact_pii on 1 MB took {elapsed:.2f}s"
 
 
 def test_vendored_secret_rules_compile():

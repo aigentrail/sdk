@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { PII_CLASSES, piiFindings, redactPII } from "../src/index.js";
+import { secretRuleSet } from "../src/piiSecrets.js";
 import { readSpecJson, seededRandom } from "./support.js";
 
 interface ConformanceCase {
@@ -152,4 +153,36 @@ test("random fields redact to a fixpoint with findings inside the field", () => 
       `${JSON.stringify(field)} -> ${JSON.stringify(redacted)}`,
     );
   }
+});
+
+test("every vendored gitleaks rule and allowlist compiles on RE2", () => {
+  const ruleSet = secretRuleSet();
+  assert.ok(ruleSet.rules.length >= 200, `compiled ${ruleSet.rules.length} rules`);
+  assert.ok(ruleSet.globalAllowlist.regexes.length > 0, "global allowlist has no regexes");
+});
+
+test("the secret scan stays linear on adversarial input", () => {
+  const fillers = ["0", "a", "a.", "a-", "a ", "aA0"];
+  const startedAt = performance.now();
+  for (const rule of secretRuleSet().rules) {
+    const keyword = rule.keywords[0];
+    for (const filler of fillers) {
+      const run = filler.repeat(100_000);
+      for (const text of [keyword + " = " + run, keyword + run, run + keyword]) {
+        for (const match of text.matchAll(rule.regex)) {
+          assert.ok(match.index >= 0);
+        }
+      }
+    }
+  }
+  const elapsedMs = performance.now() - startedAt;
+  assert.ok(elapsedMs < 10_000, `adversarial sweep took ${elapsedMs.toFixed(0)} ms`);
+});
+
+test("redacting a megabyte of digits after a secret keyword is fast", () => {
+  const field = "cohere api_key = " + "0".repeat(1_000_000);
+  const startedAt = performance.now();
+  redactPII(field);
+  const elapsedMs = performance.now() - startedAt;
+  assert.ok(elapsedMs < 2_000, `redactPII on 1 MB took ${elapsedMs.toFixed(0)} ms`);
 });

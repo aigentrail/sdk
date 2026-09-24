@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 
+import RE2 from "re2";
+
 export const PII_CLASSES = [
   "AWS_KEY",
   "CREDIT_CARD",
@@ -26,11 +28,12 @@ const DASH_CODE_POINTS = new Set([
   0x2010, 0x2011, 0x2012, 0x2013, 0x2014, 0x2015, 0x2212, 0xfe58, 0xfe63, 0xff0d,
 ]);
 const SPACE_SEPARATOR = /^\p{Zs}$/u;
-const ASCII_ONLY = /^[\x00-\x7f]*$/;
-const NUMERIC_SPAN = /[+(]?[0-9](?:[ .()\-]{0,2}[0-9])*/g;
+const ASCII_UPPERCASE_RUN = new RE2("[A-Z]+", "g");
+const ASCII_ONLY = new RE2("^[\\x00-\\x7f]*$");
+const NUMERIC_SPAN = new RE2("[+(]?[0-9](?:[ .()\\-]{0,2}[0-9])*", "g");
 const NUMERIC_SPAN_DIGITS_MIN = 8;
 const CONTEXT_WINDOW_SIZE = 40;
-const PLACEHOLDER_TOKEN = /\[(?:AWS_KEY|CREDIT_CARD|EMAIL|IBAN|PHONE|SECRET|SSN)\]/g;
+const PLACEHOLDER_TOKEN = new RE2("\\[(?:AWS_KEY|CREDIT_CARD|EMAIL|IBAN|PHONE|SECRET|SSN)\\]", "g");
 
 export class NormalizedText {
   readonly text: string;
@@ -152,7 +155,7 @@ function foldCodePoint(codePoint: number): string {
 }
 
 function lowerAscii(text: string): string {
-  return text.replace(/[A-Z]/g, (char) => String.fromCharCode(char.charCodeAt(0) + 0x20));
+  return text.replace(ASCII_UPPERCASE_RUN, (run) => run.toLowerCase());
 }
 
 function placeholderSpans(text: string): TextSpan[] {
@@ -183,11 +186,7 @@ export function countAsciiDigits(text: string): number {
   return count;
 }
 
-export function findAllInSpans(
-  pattern: RegExp,
-  text: string,
-  spans: readonly TextSpan[],
-): TextSpan[] {
+export function findAllInSpans(pattern: RE2, text: string, spans: readonly TextSpan[]): TextSpan[] {
   assert.ok(pattern.global, "findAllInSpans needs a global regex");
   const matches: TextSpan[] = [];
   for (const [spanStart, spanEnd] of spans) {
