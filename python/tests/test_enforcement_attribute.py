@@ -8,8 +8,9 @@ strands needed). Runnable as `python tests/test_enforcement_attribute.py` or
 via pytest.
 """
 
-import importlib.util
 import os
+import sys
+import types
 
 try:
     from opentelemetry.sdk.trace import TracerProvider
@@ -25,11 +26,12 @@ except ImportError:  # without the project deps: skip, not fail
     raise SystemExit(0)
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
-_spec = importlib.util.spec_from_file_location(
-    "otel_exporter", os.path.join(_HERE, "..", "gentrail", "otel_exporter.py")
-)
-_mod = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(_mod)
+_PKG_DIR = os.path.abspath(os.path.join(_HERE, "..", "gentrail"))
+if "gentrail" not in sys.modules:
+    _pkg = types.ModuleType("gentrail")
+    _pkg.__path__ = [_PKG_DIR]
+    sys.modules["gentrail"] = _pkg
+from gentrail import otel_exporter as _mod  # noqa: E402
 GovernanceTracer = _mod.GovernanceTracer
 assert _mod._try_import_otel(), "OTel packages must be installed for this test"
 

@@ -9,57 +9,12 @@ from __future__ import annotations
 
 import logging
 import os
-import re
 import threading
 from typing import Any
 
+from .pii import redact_pii
+
 logger = logging.getLogger("gentrail.otel")
-
-# --- Client-side PII redaction ------------------------------------------------
-# High-confidence PII in span input/output values is replaced with a typed
-# placeholder before the span leaves the process, so the raw value never reaches
-# the collector while the data class stays visible for governance. On by
-# default; disable with GENTRAIL_REDACT_PII=false or create_governance_tracer(
-# redact=False). Mirrors the Go SDK's redaction.
-_EMAIL_RE = re.compile(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}")
-_SSN_RE = re.compile(r"\b\d{3}-\d{2}-\d{4}\b")
-_AWS_KEY_RE = re.compile(r"\b(?:AKIA|ASIA|AIDA|AROA)[0-9A-Z]{16}\b")
-# A card candidate is 13-19 digits with optional space/dash separators; the Luhn
-# check keeps random long numbers from being redacted.
-_CARD_RE = re.compile(r"\b\d(?:[ -]?\d){12,18}\b")
-
-
-def _luhn_valid(s: str) -> bool:
-    """Report whether the 13-19 digits in s pass the Luhn checksum."""
-    digits = [ord(c) - 48 for c in s if "0" <= c <= "9"]
-    if not 13 <= len(digits) <= 19:
-        return False
-    total, double = 0, False
-    for d in reversed(digits):
-        if double:
-            d *= 2
-            if d > 9:
-                d -= 9
-        total += d
-        double = not double
-    return total % 10 == 0
-
-
-def _card_placeholder(m: "re.Match[str]") -> str:
-    return "[CREDIT_CARD]" if _luhn_valid(m.group(0)) else m.group(0)
-
-
-def redact_pii(s: str) -> str:
-    """Replace high-confidence PII in s with a typed placeholder. Emails and SSNs
-    are removed before the card scan so their digits can't be mistaken for a card.
-    """
-    if not s:
-        return s
-    s = _EMAIL_RE.sub("[EMAIL]", s)
-    s = _SSN_RE.sub("[SSN]", s)
-    s = _AWS_KEY_RE.sub("[AWS_KEY]", s)
-    s = _CARD_RE.sub(_card_placeholder, s)
-    return s
 
 # Lazy-loaded OTel modules — None until _try_import_otel() succeeds.
 _trace_mod: Any = None

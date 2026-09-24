@@ -2,7 +2,6 @@ package gentrail
 
 import (
 	"context"
-	"regexp"
 
 	"go.opentelemetry.io/otel/attribute"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
@@ -10,7 +9,7 @@ import (
 
 // Client-side PII redaction scrubs high-confidence sensitive values out of a
 // span's free-text attributes before the span leaves the process, leaving a
-// typed placeholder ([EMAIL], [SSN], [CREDIT_CARD], [AWS_KEY]). This is the
+// typed placeholder ([EMAIL], [SSN], [CREDIT_CARD], [IBAN], [PHONE], [AWS_KEY], [SECRET]). This is the
 // privacy guarantee: the raw value never reaches the collector, while the
 // placeholder preserves the governance signal (Gentrail can still see which
 // data class flowed). It runs as an exporter decorator so every exported span
@@ -22,60 +21,6 @@ import (
 var redactedKeys = map[string]bool{
 	"input.value":  true,
 	"output.value": true,
-}
-
-var (
-	emailRe  = regexp.MustCompile(`[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}`)
-	ssnRe    = regexp.MustCompile(`\b\d{3}-\d{2}-\d{4}\b`)
-	awsKeyRe = regexp.MustCompile(`\b(?:AKIA|ASIA|AIDA|AROA)[0-9A-Z]{16}\b`)
-	// A card candidate is 13-19 digits with optional space/dash separators; the
-	// Luhn check keeps random long numbers from being redacted.
-	cardRe = regexp.MustCompile(`\b\d(?:[ -]?\d){12,18}\b`)
-)
-
-// redactString replaces high-confidence PII in s with a typed placeholder.
-// Order matters: emails and SSNs are removed before the card scan so their
-// digits can't be mistaken for a card number.
-func redactString(s string) string {
-	if s == "" {
-		return s
-	}
-	s = emailRe.ReplaceAllString(s, "[EMAIL]")
-	s = ssnRe.ReplaceAllString(s, "[SSN]")
-	s = awsKeyRe.ReplaceAllString(s, "[AWS_KEY]")
-	s = cardRe.ReplaceAllStringFunc(s, func(m string) string {
-		if luhnValid(m) {
-			return "[CREDIT_CARD]"
-		}
-		return m
-	})
-	return s
-}
-
-// luhnValid reports whether the 13-19 digits in s pass the Luhn checksum;
-// non-digit separators are ignored.
-func luhnValid(s string) bool {
-	digits := make([]int, 0, len(s))
-	for _, r := range s {
-		if r >= '0' && r <= '9' {
-			digits = append(digits, int(r-'0'))
-		}
-	}
-	if len(digits) < 13 || len(digits) > 19 {
-		return false
-	}
-	sum, double := 0, false
-	for i := len(digits) - 1; i >= 0; i-- {
-		d := digits[i]
-		if double {
-			if d *= 2; d > 9 {
-				d -= 9
-			}
-		}
-		sum += d
-		double = !double
-	}
-	return sum%10 == 0
 }
 
 // redactingExporter wraps a SpanExporter, scrubbing PII from each span's
@@ -111,7 +56,7 @@ func redactSpan(s sdktrace.ReadOnlySpan) sdktrace.ReadOnlySpan {
 	for i, kv := range orig {
 		if redactedKeys[string(kv.Key)] && kv.Value.Type() == attribute.STRING {
 			raw := kv.Value.AsString()
-			if red := redactString(raw); red != raw {
+			if red := redactPII(raw); red != raw {
 				out[i] = attribute.String(string(kv.Key), red)
 				changed = true
 				continue

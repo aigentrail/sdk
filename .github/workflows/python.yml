@@ -16,6 +16,11 @@ jobs:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
       - run: uvx ruff@0.16.3 check .
+      - run: |
+          for name in gitleaks_rules.json gitleaks_LICENSE iban_registry.json; do
+            cmp "../go/$name" "gentrail/pii_data/$name"
+          done
+          cmp ../go/pii_conformance.json tests/pii_conformance.json
       # The otel deps let the span-attribute tests execute for real; tests
       # guard their own imports, so a bare `python3 tests/test_x.py` still
       # works locally without them.
