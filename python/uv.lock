@@ -22,7 +22,8 @@ version = "4.12.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "exceptiongroup", marker = "python_full_version < '3.11'" },
-    { name = "idna", version = "3.19", source = { registry = "https://pypi.org/simple" } },
+    { name = "idna", version = "3.11", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.10'" },
+    { name = "idna", version = "3.19", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
     { name = "typing-extensions", marker = "python_full_version < '3.13'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/96/f0/5eb65b2bb0d09ac6776f2eb54adee6abe8228ea05b20a5ad0e4945de8aac/anyio-4.12.1.tar.gz", hash = "sha256:41cfcc3a4c85d3f05c932da7c26d0201ac36f72abd4435ba90d0464a3ffed703", size = 228685, upload-time = "2026-01-06T11:45:21.246Z" }
@@ -388,7 +389,7 @@ wheels = [
 
 [[package]]
 name = "gentrail"
-version = "0.4.0"
+version = "0.6.0"
 source = { editable = "." }
 dependencies = [
     { name = "opentelemetry-api" },
@@ -398,6 +399,9 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
+http = [
+    { name = "httpx" },
+]
 langchain = [
     { name = "langchain", marker = "python_full_version >= '3.10'" },
 ]
@@ -410,6 +414,7 @@ strands = [
 
 [package.metadata]
 requires-dist = [
+    { name = "httpx", marker = "extra == 'http'", specifier = ">=0.27" },
     { name = "langchain", marker = "python_full_version >= '3.10' and extra == 'langchain'", specifier = ">=1.0" },
     { name = "openai-agents", marker = "python_full_version >= '3.10' and extra == 'openai-agents'", specifier = ">=0.4" },
     { name = "opentelemetry-api", specifier = ">=1.20.0" },
@@ -418,7 +423,7 @@ requires-dist = [
     { name = "pydantic", specifier = ">=2.0" },
     { name = "strands-agents", marker = "python_full_version >= '3.10' and extra == 'strands'", specifier = ">=0.1.0" },
 ]
-provides-extras = ["strands", "openai-agents", "langchain"]
+provides-extras = ["strands", "openai-agents", "langchain", "http"]
 
 [[package]]
 name = "googleapis-common-protos"
@@ -484,7 +489,8 @@ dependencies = [
     { name = "anyio" },
     { name = "certifi" },
     { name = "httpcore" },
-    { name = "idna", version = "3.19", source = { registry = "https://pypi.org/simple" } },
+    { name = "idna", version = "3.11", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.10'" },
+    { name = "idna", version = "3.19", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/b1/df/48c586a5fe32a0f01324ee087459e112ebb7224f646c0b5023f5e79e9956/httpx-0.28.1.tar.gz", hash = "sha256:75e98c5f16b0f35b567856f597f06ff2270a374470a5c2392242528e3e3e42fc", size = 141406, upload-time = "2024-12-06T15:37:23.222Z" }
 wheels = [

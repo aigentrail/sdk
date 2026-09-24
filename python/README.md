@@ -152,12 +152,18 @@ allowed and enforcement is skipped for that step.
 `init()` and `hook()` compose lower-level pieces that remain importable for
 consumers that need them directly:
 
-- `evidence_ledger.py`: a local append-only audit log with integrity hashes;
-  the hook seals one `DecisionJournal` per invocation.
+- `evidence_ledger.py`: a local audit log of `DecisionJournal`s; the hook seals
+  one per invocation. The integrity hash is SHA-256 over the journal's RFC 8785
+  canonical JSON, so the Go and JS SDKs produce the same hash for the same
+  journal (`spec/journal_vectors.json`). `init()` gives each handle its own
+  ledger at `handle.ledger`.
 - `otel_exporter.py`: `create_governance_tracer()` / `get_governance_tracer()`
-  build the OTLP pipeline without the rest of the SDK.
+  build the OTLP pipeline without the rest of the SDK. `tracer.httpx_transport()`
+  and `tracer.async_httpx_transport()` wrap an httpx client so every request is
+  recorded as a model call with latency and status (requires `httpx`).
 - `enforcement.py`: `PolicyEnforcer` and its asyncio twin `AsyncPolicyEnforcer`
-  are the raw decide/gate clients.
+  are the raw decide/gate clients; `enforce()` / `enforce_async()` run one
+  decide-and-gate cycle and return `(allowed, message)`.
 
 ## Develop
 
@@ -166,4 +172,5 @@ uv sync --extra strands
 ruff check .
 python3 tests/test_enforcement.py
 python3 tests/test_init.py
+python3 tests/test_parity_spec.py
 ```

@@ -12,6 +12,7 @@ import os
 import threading
 from typing import Any
 
+from .http_instrumentation import async_governance_transport, governance_transport
 from .pii import redact_pii
 
 logger = logging.getLogger("gentrail.otel")
@@ -160,7 +161,7 @@ class GovernanceTracer:
         response_text: str,
         input_tokens: int = 0,
         output_tokens: int = 0,
-        total_tokens: int = 0,
+        total_tokens: int | None = None,
         latency_ms: float | None = None,
         status: str = "ok",
         journal_id: str | None = None,
@@ -193,11 +194,20 @@ class GovernanceTracer:
         self.end_invocation(
             parent,
             response=response_text,
-            total_tokens=total_tokens,
+            total_tokens=input_tokens + output_tokens if total_tokens is None else total_tokens,
             tool_count=0,
             integrity_hash="",
             status=status,
         )
+
+    def httpx_transport(self, base: Any | None = None) -> Any:
+        """An httpx transport recording each request as a governance LLM call.
+        Requires httpx."""
+        return governance_transport(self, base)
+
+    def async_httpx_transport(self, base: Any | None = None) -> Any:
+        """httpx_transport for httpx.AsyncClient."""
+        return async_governance_transport(self, base)
 
     def shutdown(self) -> None:
         if hasattr(self._provider, "shutdown"):
