@@ -1,25 +1,77 @@
 {
  "source": "aigentrail-sdk",
  "value_rune_limit": 4000,
- "redacted_attribute_prefixes": ["gen_ai.", "ai.", "input.", "output."],
+ "redacted_attribute_prefixes": [
+  "gen_ai.",
+  "ai.",
+  "input.",
+  "output."
+ ],
  "redaction_applied_attribute": "aigentrail.redaction.applied",
  "enforcement_decision_attribute": "aigentrail.enforcement.decision",
  "invocation": {
   "name": "governance.invocation",
   "span_kind": "AGENT",
-  "start_attributes": ["openinference.span.kind", "aigentrail.agent.id", "agent.name", "aigentrail.journal.id", "session.id", "input.value", "source"],
-  "end_attributes": ["output.value", "aigentrail.invocation.status", "aigentrail.journal.integrity_hash", "llm.token_count.total", "aigentrail.tool.count"]
+  "start_attributes": [
+   "openinference.span.kind",
+   "aigentrail.agent.id",
+   "agent.name",
+   "aigentrail.journal.id",
+   "session.id",
+   "input.value",
+   "source"
+  ],
+  "end_attributes": [
+   "output.value",
+   "aigentrail.invocation.status",
+   "aigentrail.journal.integrity_hash",
+   "llm.token_count.total",
+   "aigentrail.tool.count"
+  ]
  },
  "model_call": {
   "name": "governance.model_call",
   "span_kind": "LLM",
-  "attributes": ["openinference.span.kind", "llm.model_name", "input.value", "output.value", "llm.token_count.prompt", "llm.token_count.completion"],
-  "optional_attributes": ["aigentrail.latency_ms"]
+  "attributes": [
+   "openinference.span.kind",
+   "llm.model_name",
+   "input.value",
+   "output.value",
+   "llm.token_count.prompt",
+   "llm.token_count.completion"
+  ],
+  "optional_attributes": [
+   "aigentrail.latency_ms"
+  ]
  },
  "tool_call": {
   "name": "<tool name>",
   "span_kind": "TOOL",
-  "attributes": ["openinference.span.kind", "tool.name", "aigentrail.agent.id", "agent.name", "input.value", "output.value"],
-  "optional_attributes": ["aigentrail.latency_ms", "aigentrail.enforcement.decision"]
+  "attributes": [
+   "openinference.span.kind",
+   "tool.name",
+   "aigentrail.agent.id",
+   "agent.name",
+   "input.value",
+   "output.value"
+  ],
+  "optional_attributes": [
+   "aigentrail.latency_ms",
+   "aigentrail.enforcement.decision"
+  ]
+ },
+ "export_filter": {
+  "attribute_prefixes": [
+   "gen_ai.",
+   "ai.",
+   "llm.",
+   "openinference.",
+   "aigentrail."
+  ],
+  "attribute_keys": [
+   "session.id",
+   "agent.name",
+   "tool.name"
+  ]
  }
 }

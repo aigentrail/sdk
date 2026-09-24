@@ -26,6 +26,7 @@ from opentelemetry.sdk.trace import ReadableSpan, SpanProcessor
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
 
 from . import otel_exporter as _otel
+from .export_filter import GenAISignalExporter
 
 _REDACTED_ATTR_PREFIXES = ("gen_ai.", "ai.", "input.", "output.")
 
@@ -103,7 +104,7 @@ class GentrailSpanProcessor(SpanProcessor):
                 raise RuntimeError(
                     "GentrailSpanProcessor requires opentelemetry-exporter-otlp-proto-http"
                 )
-        self._batch = BatchSpanProcessor(_RedactingExporter(exporter) if redact else exporter)
+        self._batch = BatchSpanProcessor(GenAISignalExporter(_RedactingExporter(exporter) if redact else exporter))
 
     def on_start(self, span: Any, parent_context: Any = None) -> None:
         self._batch.on_start(span, parent_context)

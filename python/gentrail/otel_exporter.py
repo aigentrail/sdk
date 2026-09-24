@@ -12,6 +12,7 @@ import os
 import threading
 from typing import Any
 
+from .export_filter import GenAISignalExporter
 from .http_instrumentation import async_governance_transport, governance_transport
 from .pii import redact_pii
 
@@ -241,11 +242,14 @@ def create_governance_tracer(redact: bool | None = None) -> GovernanceTracer | N
     if exporter is None:
         return None
 
-    processor = _batch_processor_mod.BatchSpanProcessor(exporter)
-    provider, flush_target = _attach_or_install_provider(processor)
-
+    # A private provider: attaching to the app's provider would export every
+    # app span (database, HTTP) to Gentrail, which instrument() handles with
+    # redaction and the GenAI filter instead. Parenting still works because
+    # the OTel context is shared across providers.
+    provider = _sdk_trace_mod.TracerProvider()
+    provider.add_span_processor(_batch_processor_mod.BatchSpanProcessor(GenAISignalExporter(exporter)))
     tracer = provider.get_tracer("aigentrail.governance")
-    return GovernanceTracer(tracer, flush_target, redact=redact)
+    return GovernanceTracer(tracer, provider, redact=redact)
 
 
 def _api_key_from_env() -> str:
@@ -313,12 +317,12 @@ def _auth_headers(api_key: str) -> dict[str, str] | None:
 
 
 def _attach_or_install_provider(processor: Any) -> tuple[Any, Any]:
-    """Give the governance span processor a TracerProvider without clobbering one
-    the app already configured.
+    """Give instrument()'s span processor a TracerProvider without clobbering
+    one the app already configured.
 
     Returns (provider, flush_target). When the app owns the provider, the flush
-    target is our processor alone, so GovernanceTracer.shutdown() cannot tear
-    down the app's tracing.
+    target is our processor alone, so shutting it down cannot tear down the
+    app's tracing.
     """
     existing = _trace_mod.get_tracer_provider()
     no_real_provider = isinstance(

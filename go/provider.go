@@ -107,9 +107,9 @@ func newOTLPExporter(ctx context.Context, cfg config) (sdktrace.SpanExporter, er
 
 func governanceSpanExporter(exporter sdktrace.SpanExporter, redact bool) sdktrace.SpanExporter {
 	if !redact {
-		return exporter
+		return genAISignalExporter{SpanExporter: exporter}
 	}
-	return redactingExporter{SpanExporter: exporter}
+	return genAISignalExporter{SpanExporter: redactingExporter{SpanExporter: exporter}}
 }
 
 // halfConfiguredTracingWarning is non-empty when the environment looks like it

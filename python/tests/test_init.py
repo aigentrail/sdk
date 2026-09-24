@@ -1,9 +1,9 @@
-"""init() wiring and the provider-attach vs fresh-provider paths.
+"""init() wiring and governance tracer provider isolation.
 
-create_governance_tracer must not clobber a TracerProvider the app already
-configured: it attaches a span processor to it and scopes shutdown to that
-processor alone. Only when no real provider exists does it install one.
-Runnable as `python tests/test_init.py` or via pytest.
+create_governance_tracer runs on a private TracerProvider: it never installs a
+global provider and never attaches to the app's, so app spans cannot reach
+Gentrail through it, while its spans still join the app's trace through the
+shared OTel context. Runnable as `python tests/test_init.py` or via pytest.
 """
 
 import os
@@ -65,41 +65,47 @@ class _env:
         os.environ.update({k: v for k, v in self.saved.items() if v is not None})
 
 
-def test_fresh_provider_installed_when_none_exists():
+def test_governance_tracer_never_installs_a_global_provider():
     _reset_global_provider()
     with _env(GENTRAIL_API_KEY="k", OTEL_EXPORTER_OTLP_ENDPOINT=UNREACHABLE_COLLECTOR):
         gt = _mod.create_governance_tracer()
         assert gt is not None
-        installed = trace_api.get_tracer_provider()
-        assert isinstance(installed, TracerProvider)
-        again = _mod.create_governance_tracer()
-        assert again is not None
-        assert trace_api.get_tracer_provider() is installed
-
-
-def test_attach_keeps_app_provider_and_carries_governance_spans():
-    _reset_global_provider()
-    memory = InMemorySpanExporter()
-    app_provider = TracerProvider()
-    app_provider.add_span_processor(SimpleSpanProcessor(memory))
-    trace_api.set_tracer_provider(app_provider)
-
-    with _env(GENTRAIL_API_KEY="k", OTEL_EXPORTER_OTLP_ENDPOINT=UNREACHABLE_COLLECTOR):
-        gt = _mod.create_governance_tracer()
-        assert gt is not None
-        assert trace_api.get_tracer_provider() is app_provider
-
-        span = gt.start_invocation("ag1", "agent", "j1", "hi")
-        gt.end_invocation(
-            span, response="ok", total_tokens=0, tool_count=0, integrity_hash=""
-        )
-        names = [s.name for s in memory.get_finished_spans()]
-        assert "governance.invocation" in names
-
+        assert not isinstance(trace_api.get_tracer_provider(), TracerProvider)
         gt.shutdown()
-        app_provider.get_tracer("app").start_span("app.after_shutdown").end()
-        names = [s.name for s in memory.get_finished_spans()]
-        assert "app.after_shutdown" in names
+
+
+def test_app_spans_never_reach_gentrail_and_governance_spans_join_the_app_trace():
+    _reset_global_provider()
+    app_memory = InMemorySpanExporter()
+    app_provider = TracerProvider()
+    app_provider.add_span_processor(SimpleSpanProcessor(app_memory))
+    trace_api.set_tracer_provider(app_provider)
+    gentrail_memory = InMemorySpanExporter()
+    original_build = _mod._build_otlp_exporter
+    original_batch = _mod._batch_processor_mod.BatchSpanProcessor
+    _mod._build_otlp_exporter = lambda api_key: gentrail_memory
+    _mod._batch_processor_mod.BatchSpanProcessor = SimpleSpanProcessor
+    try:
+        with _env(GENTRAIL_API_KEY="k", OTEL_EXPORTER_OTLP_ENDPOINT=UNREACHABLE_COLLECTOR):
+            gt = _mod.create_governance_tracer()
+    finally:
+        _mod._build_otlp_exporter = original_build
+        _mod._batch_processor_mod.BatchSpanProcessor = original_batch
+    assert trace_api.get_tracer_provider() is app_provider
+
+    with app_provider.get_tracer("app").start_as_current_span("app.db_query") as app_span:
+        app_span.set_attribute("db.statement", "SELECT * FROM users WHERE email='jane.doe@example.com'")
+        invocation = gt.start_invocation("ag1", "agent", "j1", "hi")
+        gt.end_invocation(invocation, response="ok", total_tokens=0, tool_count=0, integrity_hash="")
+
+    sent_to_gentrail = gentrail_memory.get_finished_spans()
+    assert [s.name for s in sent_to_gentrail] == ["governance.invocation"]
+    assert sent_to_gentrail[0].context.trace_id == app_span.get_span_context().trace_id
+    assert [s.name for s in app_memory.get_finished_spans()] == ["app.db_query"]
+
+    gt.shutdown()
+    app_provider.get_tracer("app").start_span("app.after_shutdown").end()
+    assert "app.after_shutdown" in [s.name for s in app_memory.get_finished_spans()]
 
 
 def test_auth_headers_default_to_bearer_and_yield_to_otel_env():
@@ -156,8 +162,8 @@ def test_init_hook_needs_strands():
 
 
 if __name__ == "__main__":
-    test_fresh_provider_installed_when_none_exists()
-    test_attach_keeps_app_provider_and_carries_governance_spans()
+    test_governance_tracer_never_installs_a_global_provider()
+    test_app_spans_never_reach_gentrail_and_governance_spans_join_the_app_trace()
     test_auth_headers_default_to_bearer_and_yield_to_otel_env()
     test_init_returns_handle_wired_from_env()
     test_init_hook_needs_strands()

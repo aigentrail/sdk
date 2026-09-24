@@ -1,0 +1,78 @@
+[
+ {
+  "name": "governance invocation",
+  "attributes": {
+   "openinference.span.kind": "AGENT",
+   "session.id": "j",
+   "agent.name": "A"
+  },
+  "exported": true
+ },
+ {
+  "name": "gen_ai semconv chat span",
+  "attributes": {
+   "gen_ai.operation.name": "chat",
+   "gen_ai.system": "openai"
+  },
+  "exported": true
+ },
+ {
+  "name": "vercel ai sdk tool call",
+  "attributes": {
+   "ai.operationId": "ai.toolCall",
+   "ai.toolCall.name": "search"
+  },
+  "exported": true
+ },
+ {
+  "name": "openinference llm span",
+  "attributes": {
+   "openinference.span.kind": "LLM",
+   "llm.model_name": "m"
+  },
+  "exported": true
+ },
+ {
+  "name": "bare tool name",
+  "attributes": {
+   "tool.name": "lookup"
+  },
+  "exported": true
+ },
+ {
+  "name": "database query",
+  "attributes": {
+   "db.system": "postgresql",
+   "db.statement": "SELECT * FROM users WHERE email='jane.doe@example.com'"
+  },
+  "exported": false
+ },
+ {
+  "name": "http client call",
+  "attributes": {
+   "http.request.method": "GET",
+   "url.full": "https://api.example.com/v1/users?ssn=123-45-6789"
+  },
+  "exported": false
+ },
+ {
+  "name": "input.value alone is not a genai signal",
+  "attributes": {
+   "input.value": "hello"
+  },
+  "exported": false
+ },
+ {
+  "name": "no attributes",
+  "attributes": {},
+  "exported": false
+ },
+ {
+  "name": "prefix must match at the start",
+  "attributes": {
+   "my.gen_ai.thing": "x",
+   "openinference": "x"
+  },
+  "exported": false
+ }
+]
