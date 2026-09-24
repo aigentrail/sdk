@@ -8,6 +8,7 @@ the Go SDK; the vendored rule data lives in gentrail/pii_data.
 
 from __future__ import annotations
 
+import bisect
 import json
 import math
 import re
@@ -36,6 +37,8 @@ class _NormalizedText:
     lower: str
     origin_of_index: Sequence[int]
     numeric_spans: Tuple[Tuple[int, int], ...]
+    placeholder_ends: Tuple[int, ...]
+    placeholder_starts: Tuple[int, ...]
 
     def finding(self, pii_class: str, start: int, end: int, detector: str) -> PIIFinding:
         assert 0 <= start < end <= len(self.text), "pii span outside normalized text"
@@ -49,13 +52,22 @@ class _NormalizedText:
         return PIIFinding(pii_class, original_start, original_end, detector)
 
     def digit_at(self, i: int) -> bool:
-        return 0 <= i < len(self.text) and "0" <= self.text[i] <= "9"
+        if i < 0 or i >= len(self.text):
+            return False
+        return "0" <= self.text[i] <= "9" or self._inside_placeholder(i)
 
     def alphanumeric_at(self, i: int) -> bool:
         if i < 0 or i >= len(self.text):
             return False
         c = self.lower[i]
-        return "0" <= c <= "9" or "a" <= c <= "z"
+        return "0" <= c <= "9" or "a" <= c <= "z" or self._inside_placeholder(i)
+
+    def _inside_placeholder(self, i: int) -> bool:
+        """A placeholder stands where a redacted value stood, so it blocks a
+        neighbouring match exactly as the glued value did; otherwise redacting
+        one value exposes the next and redaction never reaches a fixpoint."""
+        index = bisect.bisect_right(self.placeholder_ends, i)
+        return index < len(self.placeholder_ends) and self.placeholder_starts[index] <= i
 
     def context_before(self, start: int, words: Sequence[str]) -> bool:
         window = self.lower[max(0, start - 40) : start]
@@ -107,7 +119,7 @@ def pii_findings(field: str) -> List[PIIFinding]:
 def _normalize(original: str) -> _NormalizedText:
     if original.isascii():
         spans = tuple(_numeric_spans(original))
-        return _NormalizedText(original, original.lower(), range(len(original) + 1), spans)
+        return _NormalizedText(original, original.lower(), range(len(original) + 1), spans, *_placeholder_bounds(original))
     parts: List[str] = []
     origin: List[int] = []
     copied_to = 0
@@ -125,7 +137,15 @@ def _normalize(original: str) -> _NormalizedText:
     text = "".join(parts)
     assert len(origin) == len(text) + 1, "pii normalization lost its offset map"
     lower = text.translate(_ASCII_UPPER_TO_LOWER)
-    return _NormalizedText(text, lower, tuple(origin), tuple(_numeric_spans(text)))
+    return _NormalizedText(text, lower, tuple(origin), tuple(_numeric_spans(text)), *_placeholder_bounds(text))
+
+
+_PLACEHOLDER_RE = re.compile(r"\[(?:" + "|".join(PII_CLASSES) + r")\]")
+
+
+def _placeholder_bounds(text: str) -> Tuple[Tuple[int, ...], Tuple[int, ...]]:
+    spans = [m.span() for m in _PLACEHOLDER_RE.finditer(text)]
+    return tuple(end for _, end in spans), tuple(start for start, _ in spans)
 
 
 _ASCII_UPPER_TO_LOWER = str.maketrans("ABCDEFGHIJKLMNOPQRSTUVWXYZ", "abcdefghijklmnopqrstuvwxyz")

@@ -16,6 +16,10 @@ const (
 	piiClassSSN        = "SSN"
 )
 
+var placeholderRe = regexp.MustCompile(`\[(?:` + strings.Join([]string{
+	piiClassAWSKey, piiClassCreditCard, piiClassEmail, piiClassIBAN, piiClassPhone, piiClassSecret, piiClassSSN,
+}, "|") + `)\]`)
+
 type piiFinding struct {
 	class         string
 	originalStart int
