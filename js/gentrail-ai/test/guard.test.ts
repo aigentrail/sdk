@@ -1,48 +1,8 @@
 import assert from "node:assert/strict";
-import { createServer, type IncomingMessage } from "node:http";
-import type { AddressInfo } from "node:net";
 import test from "node:test";
 
 import { GentrailPolicyError, guardTools } from "../src/index.js";
-
-interface Route {
-  status?: number;
-  json?: unknown;
-}
-
-interface Seen {
-  url: string;
-  auth: string | undefined;
-  json: unknown;
-}
-
-async function serve(handler: (req: IncomingMessage, calls: number) => Route) {
-  const requests: Seen[] = [];
-  let calls = 0;
-  const server = createServer((req, res) => {
-    let data = "";
-    req.on("data", (chunk) => (data += chunk));
-    req.on("end", () => {
-      calls += 1;
-      requests.push({
-        url: req.url ?? "",
-        auth: req.headers.authorization,
-        json: data ? JSON.parse(data) : undefined,
-      });
-      const route = handler(req, calls);
-      res.statusCode = route.status ?? 200;
-      res.setHeader("content-type", "application/json");
-      res.end(JSON.stringify(route.json ?? {}));
-    });
-  });
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  const { port } = server.address() as AddressInfo;
-  return {
-    base: `http://127.0.0.1:${port}`,
-    requests,
-    close: () => new Promise<void>((resolve) => server.close(() => resolve())),
-  };
-}
+import { serve } from "./support.js";
 
 function sqlTool() {
   const state = { ran: false };
