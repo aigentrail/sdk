@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -264,5 +265,93 @@ func TestDecideExplicitInvocationIDBeatsTheAmbientOne(t *testing.T) {
 
 	if got := gotBody["invocation_id"]; got != "4bf92f3577b34da6a3ce929d0e0e4736" {
 		t.Errorf("invocation_id = %v, want the explicit id", got)
+	}
+}
+
+type enforceVector struct {
+	Name       string          `json:"name"`
+	Verdict    json.RawMessage `json:"verdict"`
+	GateStatus *string         `json:"gate_status"`
+	Allowed    bool            `json:"allowed"`
+	Message    string          `json:"message"`
+}
+
+func loadEnforceVectors(t *testing.T) []enforceVector {
+	t.Helper()
+	raw, err := os.ReadFile("../spec/enforce_vectors.json")
+	if err != nil {
+		t.Fatalf("read enforce vectors: %v", err)
+	}
+	var vectors []enforceVector
+	if err := json.Unmarshal(raw, &vectors); err != nil {
+		t.Fatalf("unmarshal enforce vectors: %v", err)
+	}
+	if len(vectors) == 0 {
+		t.Fatal("no enforce vectors")
+	}
+	return vectors
+}
+
+func newEnforceVectorServer(t *testing.T, vector enforceVector) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/decide":
+			w.Write(vector.Verdict)
+		case "/api/v1/approvals/1":
+			if vector.GateStatus == nil {
+				t.Errorf("gate polled although the vector has no gate status")
+				http.Error(w, "unexpected poll", http.StatusInternalServerError)
+				return
+			}
+			json.NewEncoder(w).Encode(map[string]string{"status": *vector.GateStatus})
+		default:
+			t.Errorf("unexpected path %q", r.URL.Path)
+			http.NotFound(w, r)
+		}
+	}))
+}
+
+func TestEnforceMatchesSharedVectors(t *testing.T) {
+	for _, vector := range loadEnforceVectors(t) {
+		t.Run(vector.Name, func(t *testing.T) {
+			srv := newEnforceVectorServer(t, vector)
+			defer srv.Close()
+			enforcer := newTestEnforcer(srv.URL)
+			enforcer.gateTimeout = time.Second
+
+			allowed, message := enforcer.Enforce(context.Background(), "wire_funds", map[string]any{"amount": 10},
+				WithAgentID("agent-1"), WithRequestID("req-1"))
+
+			if allowed != vector.Allowed || message != vector.Message {
+				t.Errorf("Enforce = (%v, %q), want (%v, %q)", allowed, message, vector.Allowed, vector.Message)
+			}
+		})
+	}
+}
+
+func TestEnforceGateWaitsForTheConfiguredTimeout(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/decide" {
+			json.NewEncoder(w).Encode(Verdict{Decision: DecisionGate, Rule: "r", Approval: &Approval{StatusURL: "/hold"}})
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]string{"status": "pending"})
+	}))
+	defer srv.Close()
+	enforcer := newTestEnforcer(srv.URL)
+	enforcer.gateTimeout = 20 * time.Millisecond
+
+	allowed, message := enforcer.Enforce(context.Background(), "t", nil)
+
+	if allowed || message != "GATE by policy r (approval timeout)" {
+		t.Errorf("Enforce = (%v, %q), want an unanswered gate to fail closed", allowed, message)
+	}
+}
+
+func TestNilEnforcerEnforceAllows(t *testing.T) {
+	var e *Enforcer
+	if allowed, message := e.Enforce(context.Background(), "run_sql", nil); !allowed || message != "" {
+		t.Errorf("nil Enforce = (%v, %q), want (true, \"\")", allowed, message)
 	}
 }

@@ -262,3 +262,34 @@ func (e *Enforcer) setAuthHeaders(req *http.Request) {
 	req.Header.Set("Authorization", "Bearer "+e.apiKey)
 	req.Header.Set("User-Agent", enforcerUserAgent)
 }
+
+// Enforce runs one decide-and-gate cycle for a proposed tool call. ALLOW, an
+// unknown decision, and an approved GATE return (true, ""). BLOCK and a
+// denied, expired, or unanswered GATE return (false, message), where message
+// is what the model should see in place of the tool result. GATE waits up to
+// the enforcer's gate timeout. A nil Enforcer allows every call.
+func (e *Enforcer) Enforce(ctx context.Context, toolName string, toolArgs map[string]any, opts ...DecideOption) (allowed bool, message string) {
+	if e == nil {
+		return true, ""
+	}
+	verdict := e.Decide(ctx, toolName, toolArgs, opts...)
+	switch verdict.Decision {
+	case DecisionBlock:
+		return false, verdictMessage(verdict)
+	case DecisionGate:
+		status := e.AwaitGate(ctx, verdict.Approval, e.gateTimeout)
+		if status == GateApproved {
+			return true, ""
+		}
+		return false, verdictMessage(verdict) + " (approval " + status + ")"
+	default:
+		return true, ""
+	}
+}
+
+func verdictMessage(verdict Verdict) string {
+	if verdict.Message != "" {
+		return verdict.Message
+	}
+	return strings.TrimSpace(verdict.Decision + " by policy " + verdict.Rule)
+}

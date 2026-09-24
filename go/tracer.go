@@ -16,6 +16,8 @@ const (
 	modelCallSpanName  = "governance.model_call"
 	sourceAttrValue    = "aigentrail-sdk"
 
+	enforcementDecisionAttributeKey = "aigentrail.enforcement.decision"
+
 	maxInputValueRunes  = 4000
 	maxOutputValueRunes = 4000
 	maxModelOutputRunes = 4000
@@ -24,8 +26,9 @@ const (
 // Tracer emits governance spans (invocations, model calls, tool calls) over
 // OTLP. Construct one per process with New; call Shutdown before exit.
 type Tracer struct {
-	tracer   trace.Tracer
-	provider *sdktrace.TracerProvider
+	tracer       trace.Tracer
+	provider     *sdktrace.TracerProvider
+	redactValues bool
 }
 
 // InvocationParams describes a new agent invocation that wraps a sequence of
@@ -59,14 +62,19 @@ type ModelCallParams struct {
 }
 
 // ToolCallParams describes a single tool invocation inside an agent
-// invocation. A zero DurationMS is omitted from the span.
+// invocation. A zero DurationMS is omitted from the span. EnforcedDecision is
+// the pre-execution verdict (DecisionBlock or DecisionGate) that cancelled the
+// call; when set it is stamped as aigentrail.enforcement.decision so the
+// evaluator marks the matching violation as prevented rather than a fresh
+// alarm.
 type ToolCallParams struct {
-	AgentID    string
-	AgentName  string
-	Name       string
-	Args       string
-	Result     string
-	DurationMS float64
+	AgentID          string
+	AgentName        string
+	Name             string
+	Args             string
+	Result           string
+	DurationMS       float64
+	EnforcedDecision string
 }
 
 // LLMCallParams describes a single standalone LLM call for RecordLLMCall.
@@ -88,7 +96,8 @@ type LLMCallParams struct {
 // exactly once. The context returned by StartInvocation must be passed to
 // RecordModelCall and RecordToolCall so they nest correctly.
 type Invocation struct {
-	span trace.Span
+	span   trace.Span
+	tracer *Tracer
 }
 
 // StartInvocation opens a governance.invocation span and returns a context
@@ -109,10 +118,10 @@ func (t *Tracer) StartInvocation(ctx context.Context, p InvocationParams) (conte
 		attribute.String("agent.name", p.AgentName),
 		attribute.String("aigentrail.journal.id", p.JournalID),
 		attribute.String("session.id", p.JournalID),
-		attribute.String("input.value", truncateRunes(p.UserMessage, maxInputValueRunes)),
+		attribute.String("input.value", t.spanValue(p.UserMessage, maxInputValueRunes)),
 		attribute.String("source", sourceAttrValue),
 	)
-	return ctx, &Invocation{span: span}
+	return ctx, &Invocation{span: span, tracer: t}
 }
 
 // End closes the invocation span. Status defaults to "ok" if empty. A nil
@@ -126,7 +135,7 @@ func (i *Invocation) End(p InvocationEndParams) {
 		status = "ok"
 	}
 	i.span.SetAttributes(
-		attribute.String("output.value", truncateRunes(p.Response, maxOutputValueRunes)),
+		attribute.String("output.value", i.tracer.spanValue(p.Response, maxOutputValueRunes)),
 		attribute.String("aigentrail.invocation.status", status),
 		attribute.String("aigentrail.journal.integrity_hash", p.IntegrityHash),
 		attribute.Int64("llm.token_count.total", p.TotalTokens),
@@ -148,8 +157,8 @@ func (t *Tracer) RecordModelCall(ctx context.Context, p ModelCallParams) {
 	span.SetAttributes(
 		attribute.String("openinference.span.kind", "LLM"),
 		attribute.String("llm.model_name", p.ModelID),
-		attribute.String("input.value", truncateRunes(p.Prompt, maxInputValueRunes)),
-		attribute.String("output.value", truncateRunes(p.ResponseText, maxModelOutputRunes)),
+		attribute.String("input.value", t.spanValue(p.Prompt, maxInputValueRunes)),
+		attribute.String("output.value", t.spanValue(p.ResponseText, maxModelOutputRunes)),
 		attribute.Int64("llm.token_count.prompt", p.InputTokens),
 		attribute.Int64("llm.token_count.completion", p.OutputTokens),
 	)
@@ -173,11 +182,14 @@ func (t *Tracer) RecordToolCall(ctx context.Context, p ToolCallParams) {
 		attribute.String("tool.name", p.Name),
 		attribute.String("aigentrail.agent.id", p.AgentID),
 		attribute.String("agent.name", p.AgentName),
-		attribute.String("input.value", truncateRunes(p.Args, maxInputValueRunes)),
-		attribute.String("output.value", truncateRunes(p.Result, maxOutputValueRunes)),
+		attribute.String("input.value", t.spanValue(p.Args, maxInputValueRunes)),
+		attribute.String("output.value", t.spanValue(p.Result, maxOutputValueRunes)),
 	)
 	if p.DurationMS > 0 {
 		span.SetAttributes(attribute.Float64("aigentrail.latency_ms", p.DurationMS))
+	}
+	if p.EnforcedDecision != "" {
+		span.SetAttributes(attribute.String(enforcementDecisionAttributeKey, p.EnforcedDecision))
 	}
 }
 
@@ -206,6 +218,15 @@ func (t *Tracer) RecordLLMCall(ctx context.Context, p LLMCallParams) {
 		TotalTokens: p.InputTokens + p.OutputTokens,
 		Status:      p.Status,
 	})
+}
+
+// spanValue redacts before truncating so PII straddling the rune limit is
+// scrubbed whole instead of being cut into an undetectable fragment.
+func (t *Tracer) spanValue(value string, runeLimit int) string {
+	if t.redactValues {
+		value = redactPII(value)
+	}
+	return truncateRunes(value, runeLimit)
 }
 
 func newJournalID() string {

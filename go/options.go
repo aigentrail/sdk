@@ -1,19 +1,25 @@
 package gentrail
 
+import (
+	"os"
+	"strings"
+)
+
 // Option configures a Tracer at construction time.
 type Option func(*config)
 
 type config struct {
-	apiKey            string
-	endpoint          string
-	certificateFile   string
-	insecure          bool
-	setGlobalProvider bool
-	redact            bool
+	apiKey               string
+	endpoint             string
+	certificateFile      string
+	insecure             bool
+	setGlobalProvider    bool
+	redact               bool
+	envHeadersConfigured bool
 }
 
-// WithAPIKey sets the bearer credential used for OTLP Basic auth. Overrides
-// GENTRAIL_API_KEY.
+// WithAPIKey sets the credential sent as a Bearer token to the collector.
+// Overrides GENTRAIL_API_KEY.
 func WithAPIKey(key string) Option {
 	return func(c *config) { c.apiKey = key }
 }
@@ -24,13 +30,15 @@ func WithEndpoint(url string) Option {
 	return func(c *config) { c.endpoint = url }
 }
 
-// WithCertificateFile sets a CA bundle path for TLS verification.
+// WithCertificateFile sets a CA bundle path for TLS verification. Overrides
+// OTEL_EXPORTER_OTLP_CERTIFICATE.
 func WithCertificateFile(path string) Option {
 	return func(c *config) { c.certificateFile = path }
 }
 
 // WithInsecure disables TLS certificate verification. Use only for local
-// collectors with self-signed certs.
+// collectors with self-signed certs. Equivalent to
+// OTEL_EXPORTER_OTLP_INSECURE=true.
 func WithInsecure() Option {
 	return func(c *config) { c.insecure = true }
 }
@@ -49,4 +57,31 @@ func WithSetGlobalProvider() Option {
 // GENTRAIL_REDACT_PII.
 func WithRedaction(enabled bool) Option {
 	return func(c *config) { c.redact = enabled }
+}
+
+func loadConfig(opts []Option) config {
+	cfg := config{
+		apiKey:               os.Getenv("GENTRAIL_API_KEY"),
+		endpoint:             os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT"),
+		certificateFile:      os.Getenv("OTEL_EXPORTER_OTLP_CERTIFICATE"),
+		insecure:             insecureFromEnv(),
+		redact:               !strings.EqualFold(os.Getenv("GENTRAIL_REDACT_PII"), "false"),
+		envHeadersConfigured: os.Getenv("OTEL_EXPORTER_OTLP_HEADERS") != "" || os.Getenv("OTEL_EXPORTER_OTLP_TRACES_HEADERS") != "",
+	}
+	for _, opt := range opts {
+		opt(&cfg)
+	}
+	if cfg.endpoint == "" {
+		cfg.endpoint = DefaultEndpoint
+	}
+	return cfg
+}
+
+func insecureFromEnv() bool {
+	switch strings.ToLower(os.Getenv("OTEL_EXPORTER_OTLP_INSECURE")) {
+	case "true", "1", "yes":
+		return true
+	default:
+		return false
+	}
 }
