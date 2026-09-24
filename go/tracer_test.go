@@ -273,34 +273,32 @@ func TestRecordModelCallTruncatesLongOutput(t *testing.T) {
 	}
 }
 
-func TestSplitEndpointVariants(t *testing.T) {
-	cases := []struct {
-		in       string
-		wantHost string
-		wantPath string
-	}{
-		{"https://otel.gentrail.ai:4318", "otel.gentrail.ai:4318", "/v1/traces"},
-		{"http://localhost:4318/", "localhost:4318", "/v1/traces"},
-		{"https://otel.gentrail.ai:4318/custom", "otel.gentrail.ai:4318", "/custom/v1/traces"},
-		{"host:4318", "host:4318", "/v1/traces"},
-		{"https://otel.gentrail.ai", "otel.gentrail.ai:443", "/v1/traces"},
-		{"http://localhost", "localhost:80", "/v1/traces"},
+func TestTracesEndpointURLVariants(t *testing.T) {
+	cases := []struct{ endpoint, want string }{
+		{"https://otel.gentrail.ai:4318", "https://otel.gentrail.ai:4318/v1/traces"},
+		{"http://localhost:4318/", "http://localhost:4318/v1/traces"},
+		{"https://otel.gentrail.ai:4318/custom", "https://otel.gentrail.ai:4318/custom/v1/traces"},
+		{"host:4318", "https://host:4318/v1/traces"},
+		{"https://otel.gentrail.ai", "https://otel.gentrail.ai/v1/traces"},
+		{"http://localhost", "http://localhost/v1/traces"},
 	}
 	for _, c := range cases {
-		host, path, err := splitEndpoint(c.in)
+		got, err := tracesEndpointURL(c.endpoint)
 		if err != nil {
-			t.Errorf("%q: %v", c.in, err)
+			t.Errorf("%q: %v", c.endpoint, err)
 			continue
 		}
-		if host != c.wantHost || path != c.wantPath {
-			t.Errorf("%q: host=%q path=%q, want host=%q path=%q", c.in, host, path, c.wantHost, c.wantPath)
+		if got != c.want {
+			t.Errorf("%q: got %q, want %q", c.endpoint, got, c.want)
 		}
 	}
 }
 
-func TestSplitEndpointRejectsEmpty(t *testing.T) {
-	if _, _, err := splitEndpoint(""); err == nil {
-		t.Error("want error for empty endpoint")
+func TestTracesEndpointURLRejectsMissingHostAndForeignScheme(t *testing.T) {
+	for _, endpoint := range []string{"", "https://", "http:///path", "grpc://host:4317"} {
+		if _, err := tracesEndpointURL(endpoint); err == nil {
+			t.Errorf("%q: want error for an endpoint with no host or a non-HTTP scheme", endpoint)
+		}
 	}
 }
 
@@ -378,5 +376,43 @@ func TestNewWithoutAPIKeyReturnsErr(t *testing.T) {
 	_, err := New(context.Background())
 	if err != ErrMissingAPIKey {
 		t.Errorf("err = %v, want ErrMissingAPIKey", err)
+	}
+}
+
+func TestRecordToolCallStampsEnforcedDecision(t *testing.T) {
+	tracer, recorder := newTestTracer(t)
+	ctx, inv := tracer.StartInvocation(context.Background(), InvocationParams{AgentID: "a"})
+	tracer.RecordToolCall(ctx, ToolCallParams{Name: "blocked_tool", EnforcedDecision: DecisionBlock})
+	tracer.RecordToolCall(ctx, ToolCallParams{Name: "allowed_tool"})
+	inv.End(InvocationEndParams{})
+
+	for _, s := range recorder.Ended() {
+		decision, present := attrMap(s.Attributes())["aigentrail.enforcement.decision"]
+		switch s.Name() {
+		case "blocked_tool":
+			if !present || decision.AsString() != DecisionBlock {
+				t.Errorf("blocked_tool decision = %v (present %v), want BLOCK", decision.Emit(), present)
+			}
+		default:
+			if present {
+				t.Errorf("span %q carries an enforcement decision it was never given", s.Name())
+			}
+		}
+	}
+}
+
+func TestTracerRedactsValuesBeforeTruncating(t *testing.T) {
+	tracer, recorder := newTestTracer(t)
+	tracer.redactValues = true
+	straddling := strings.Repeat("x", maxInputValueRunes-10) + " jane.doe@example.com"
+	_, inv := tracer.StartInvocation(context.Background(), InvocationParams{AgentID: "a", UserMessage: straddling})
+	inv.End(InvocationEndParams{Response: "reply to jane.doe@example.com"})
+
+	attrs := attrMap(recorder.Ended()[0].Attributes())
+	if got := attrs["input.value"].AsString(); strings.Contains(got, "jane") || !strings.HasSuffix(got, " [EMAIL]") {
+		t.Errorf("input.value tail = %q, want the straddling email redacted whole", got[len(got)-20:])
+	}
+	if got := attrs["output.value"].AsString(); got != "reply to [EMAIL]" {
+		t.Errorf("output.value = %q, want redacted", got)
 	}
 }

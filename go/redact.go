@@ -2,6 +2,7 @@ package gentrail
 
 import (
 	"context"
+	"strings"
 
 	"go.opentelemetry.io/otel/attribute"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
@@ -9,22 +10,16 @@ import (
 
 // Client-side PII redaction scrubs high-confidence sensitive values out of a
 // span's free-text attributes before the span leaves the process, leaving a
-// typed placeholder ([EMAIL], [SSN], [CREDIT_CARD], [IBAN], [PHONE], [AWS_KEY], [SECRET]). This is the
-// privacy guarantee: the raw value never reaches the collector, while the
-// placeholder preserves the governance signal (Gentrail can still see which
-// data class flowed). It runs as an exporter decorator so every exported span
-// is covered regardless of which instrumentation set the attribute. On by
-// default; disable with WithRedaction(false) or GENTRAIL_REDACT_PII=false.
+// typed placeholder ([EMAIL], [SSN], [CREDIT_CARD], [IBAN], [PHONE], [AWS_KEY],
+// [SECRET]). The raw value never reaches the collector, while the placeholder
+// preserves the governance signal. It runs as an exporter decorator because
+// that is the one point where every attribute is final and the SDK owns the
+// data: the provider's other exporters keep the raw span.
 
-// redactedKeys are the free-text span attributes scanned for PII. Structured
-// attributes (ids, agent names, token counts) are left untouched.
-var redactedKeys = map[string]bool{
-	"input.value":  true,
-	"output.value": true,
-}
+var redactedAttributePrefixes = []string{"gen_ai.", "ai.", "input.", "output."}
 
-// redactingExporter wraps a SpanExporter, scrubbing PII from each span's
-// free-text attributes before delegating the export.
+const redactionAppliedAttributeKey = "aigentrail.redaction.applied"
+
 type redactingExporter struct {
 	sdktrace.SpanExporter
 }
@@ -47,25 +42,55 @@ type redactedSpan struct {
 
 func (r redactedSpan) Attributes() []attribute.KeyValue { return r.attrs }
 
-// redactSpan returns s with its free-text value attributes scrubbed, or s
-// unchanged when nothing matched (so unaffected spans keep their original type).
+// redactSpan returns s unchanged when nothing matched, so unaffected spans
+// keep their original type and carry no redaction stamp.
 func redactSpan(s sdktrace.ReadOnlySpan) sdktrace.ReadOnlySpan {
-	orig := s.Attributes()
-	out := make([]attribute.KeyValue, len(orig))
+	original := s.Attributes()
+	redacted := make([]attribute.KeyValue, 0, len(original)+1)
 	changed := false
-	for i, kv := range orig {
-		if redactedKeys[string(kv.Key)] && kv.Value.Type() == attribute.STRING {
-			raw := kv.Value.AsString()
-			if red := redactPII(raw); red != raw {
-				out[i] = attribute.String(string(kv.Key), red)
-				changed = true
-				continue
-			}
+	for _, kv := range original {
+		if kv.Key == redactionAppliedAttributeKey {
+			continue
 		}
-		out[i] = kv
+		replacement, replaced := redactAttribute(kv)
+		changed = changed || replaced
+		redacted = append(redacted, replacement)
 	}
 	if !changed {
 		return s
 	}
-	return redactedSpan{ReadOnlySpan: s, attrs: out}
+	redacted = append(redacted, attribute.Bool(redactionAppliedAttributeKey, true))
+	return redactedSpan{ReadOnlySpan: s, attrs: redacted}
+}
+
+func redactAttribute(kv attribute.KeyValue) (attribute.KeyValue, bool) {
+	if !hasRedactedAttributePrefix(string(kv.Key)) {
+		return kv, false
+	}
+	switch kv.Value.Type() {
+	case attribute.STRING:
+		raw := kv.Value.AsString()
+		scrubbed := redactPII(raw)
+		return attribute.String(string(kv.Key), scrubbed), scrubbed != raw
+	case attribute.STRINGSLICE:
+		values := kv.Value.AsStringSlice()
+		changed := false
+		for i, raw := range values {
+			scrubbed := redactPII(raw)
+			changed = changed || scrubbed != raw
+			values[i] = scrubbed
+		}
+		return attribute.StringSlice(string(kv.Key), values), changed
+	default:
+		return kv, false
+	}
+}
+
+func hasRedactedAttributePrefix(key string) bool {
+	for _, prefix := range redactedAttributePrefixes {
+		if strings.HasPrefix(key, prefix) {
+			return true
+		}
+	}
+	return false
 }

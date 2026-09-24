@@ -1,6 +1,7 @@
 package gentrail
 
 import (
+	"sort"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -12,6 +13,7 @@ type normalizedText struct {
 	text         string
 	lower        string
 	numericSpans [][2]int
+	placeholders [][2]int
 	originOfByte []int
 }
 
@@ -36,7 +38,13 @@ func normalizeForPII(original string) normalizedText {
 	if len(originOfByte) != len(text)+1 {
 		panic("gentrail: pii normalization lost its offset map")
 	}
-	return normalizedText{text: text, lower: asciiLower(text), numericSpans: findNumericSpans(text), originOfByte: originOfByte}
+	return normalizedText{
+		text:         text,
+		lower:        asciiLower(text),
+		numericSpans: findNumericSpans(text),
+		placeholders: findPlaceholderSpans(text),
+		originOfByte: originOfByte,
+	}
 }
 
 func foldRuneForPII(r rune) string {
@@ -75,7 +83,10 @@ func (t normalizedText) finding(class string, start, end int, detector string) p
 }
 
 func (t normalizedText) digitAt(i int) bool {
-	return i >= 0 && i < len(t.text) && t.text[i] >= '0' && t.text[i] <= '9'
+	if i < 0 || i >= len(t.text) {
+		return false
+	}
+	return (t.text[i] >= '0' && t.text[i] <= '9') || t.insidePlaceholder(i)
 }
 
 func (t normalizedText) alphanumericAt(i int) bool {
@@ -83,7 +94,23 @@ func (t normalizedText) alphanumericAt(i int) bool {
 		return false
 	}
 	b := t.lower[i]
-	return (b >= '0' && b <= '9') || (b >= 'a' && b <= 'z')
+	return (b >= '0' && b <= '9') || (b >= 'a' && b <= 'z') || t.insidePlaceholder(i)
+}
+
+func findPlaceholderSpans(text string) [][2]int {
+	var spans [][2]int
+	for _, m := range placeholderRe.FindAllStringIndex(text, -1) {
+		spans = append(spans, [2]int{m[0], m[1]})
+	}
+	return spans
+}
+
+// A placeholder stands where a redacted value stood, so it must block a
+// neighbouring match exactly as the glued value did; otherwise redacting one
+// value exposes the next and redaction never reaches a fixpoint.
+func (t normalizedText) insidePlaceholder(i int) bool {
+	next := sort.Search(len(t.placeholders), func(k int) bool { return t.placeholders[k][1] > i })
+	return next < len(t.placeholders) && t.placeholders[next][0] <= i
 }
 
 func (t normalizedText) contextBefore(start int, words []string) bool {

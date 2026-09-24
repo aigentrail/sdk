@@ -65,7 +65,7 @@ _PLACEHOLDER_RE = re.compile(r"\[(AWS_KEY|CREDIT_CARD|EMAIL|IBAN|PHONE|SECRET|SS
 
 
 def test_redaction_conforms_to_gentrail_corpus():
-    with open(os.path.join(_HERE, "pii_conformance.json"), encoding="utf-8") as f:
+    with open(os.path.join(_HERE, "..", "..", "spec", "pii_conformance.json"), encoding="utf-8") as f:
         corpus = json.load(f)
     assert tuple(corpus["classes"]) == _pii.PII_CLASSES, f"corpus classes {corpus['classes']} vs SDK {_pii.PII_CLASSES}"
     assert corpus["cases"], "corpus has no cases"
@@ -85,6 +85,7 @@ def test_redaction_conforms_to_gentrail_corpus():
 def test_redaction_leaves_nothing_detectable():
     for field in [
         "0@0.AA+000000000000000",
+        "0@0.AA+00000000+00000000+00000000+00000000",
         "ssn 123-45-6789 and a@b.com 4111111111111111",
         "phone 555-123-4567 api_key = \"q8Zr4TmN2vX7pL1kW9sB\"",
     ]:

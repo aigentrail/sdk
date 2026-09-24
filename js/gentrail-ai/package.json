@@ -1,7 +1,7 @@
 {
   "name": "@gentrail/ai",
-  "version": "0.1.0",
-  "description": "Gentrail inline policy enforcement for Vercel AI SDK tools",
+  "version": "0.2.0",
+  "description": "Gentrail SDK: governance tracing, PII redaction, inline policy enforcement, and evidence capture for AI agents",
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
@@ -19,7 +19,8 @@
     }
   },
   "files": [
-    "dist/src"
+    "dist/src",
+    "data"
   ],
   "engines": {
     "node": ">=20"
@@ -31,5 +32,11 @@
   "devDependencies": {
     "@types/node": "^22",
     "typescript": "^5"
+  },
+  "dependencies": {
+    "@opentelemetry/api": "^1.9.1",
+    "@opentelemetry/context-async-hooks": "^2.11.0",
+    "@opentelemetry/exporter-trace-otlp-http": "^0.222.0",
+    "@opentelemetry/sdk-trace-base": "^2.11.0"
   }
 }

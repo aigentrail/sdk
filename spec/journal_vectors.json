@@ -1,0 +1,101 @@
+[
+ {
+  "name": "tool call with float latency",
+  "journal": {
+   "journal_id": "inv-2026-0924-a1b2c3",
+   "agent_id": "agent-billing",
+   "agent_name": "Billing Agent",
+   "started_at": "2026-09-24T05:57:37.615Z",
+   "completed_at": "2026-09-24T05:57:39.004Z",
+   "user_message": "Refund order 4411",
+   "final_response": "Refund issued.",
+   "model_calls": [
+    {
+     "model_id": "claude-sonnet",
+     "prompt_preview": "Refund order 4411",
+     "cot_reasoning": "",
+     "token_usage": {
+      "input": 120,
+      "output": 48
+     },
+     "latency_ms": 812.25
+    }
+   ],
+   "tool_calls": [
+    {
+     "tool_name": "issue_refund",
+     "tool_args": {
+      "order_id": 4411,
+      "amount": 19.99,
+      "notify": true
+     },
+     "result": "ok",
+     "duration_ms": 41.5
+    }
+   ],
+   "total_tokens": 168,
+   "sealed": true
+  },
+  "canonical": "{\"agent_id\":\"agent-billing\",\"agent_name\":\"Billing Agent\",\"completed_at\":\"2026-09-24T05:57:39.004Z\",\"final_response\":\"Refund issued.\",\"journal_id\":\"inv-2026-0924-a1b2c3\",\"model_calls\":[{\"cot_reasoning\":\"\",\"latency_ms\":812.25,\"model_id\":\"claude-sonnet\",\"prompt_preview\":\"Refund order 4411\",\"token_usage\":{\"input\":120,\"output\":48}}],\"sealed\":true,\"started_at\":\"2026-09-24T05:57:37.615Z\",\"tool_calls\":[{\"duration_ms\":41.5,\"result\":\"ok\",\"tool_args\":{\"amount\":19.99,\"notify\":true,\"order_id\":4411},\"tool_name\":\"issue_refund\"}],\"total_tokens\":168,\"user_message\":\"Refund order 4411\"}",
+  "integrity_hash": "1e8662f5e9de357429749669c20ad152f6c85e5ea07928731e4fa76e501841c8"
+ },
+ {
+  "name": "unicode keys, nested args, and control characters",
+  "journal": {
+   "journal_id": "inv-2026-0924-d4e5f6",
+   "agent_id": "agent-été",
+   "agent_name": "Été 😀",
+   "started_at": "2026-01-02T03:04:05.000Z",
+   "completed_at": "2026-01-02T03:04:06.999Z",
+   "user_message": "line one\nline\ttwo   \"quoted\" \\ \u0001",
+   "final_response": "",
+   "model_calls": [],
+   "tool_calls": [
+    {
+     "tool_name": "search",
+     "tool_args": {
+      "😀": 1,
+      "￿": 2,
+      "a": [
+       1.5e-07,
+       1e+21,
+       0.1,
+       null,
+       false
+      ],
+      "nested": {
+       "z": "last",
+       "b": {
+        "k": -0.5
+       }
+      }
+     },
+     "result": null,
+     "duration_ms": null
+    }
+   ],
+   "total_tokens": 0,
+   "sealed": true
+  },
+  "canonical": "{\"agent_id\":\"agent-été\",\"agent_name\":\"Été 😀\",\"completed_at\":\"2026-01-02T03:04:06.999Z\",\"final_response\":\"\",\"journal_id\":\"inv-2026-0924-d4e5f6\",\"model_calls\":[],\"sealed\":true,\"started_at\":\"2026-01-02T03:04:05.000Z\",\"tool_calls\":[{\"duration_ms\":null,\"result\":null,\"tool_args\":{\"a\":[1.5e-7,1e+21,0.1,null,false],\"nested\":{\"b\":{\"k\":-0.5},\"z\":\"last\"},\"😀\":1,\"￿\":2},\"tool_name\":\"search\"}],\"total_tokens\":0,\"user_message\":\"line one\\nline\\ttwo   \\\"quoted\\\" \\\\ \\u0001\"}",
+  "integrity_hash": "f613c6c0a670b06db19947371bd8e750da710830f33dc3f63e292919a68986a9"
+ },
+ {
+  "name": "no calls",
+  "journal": {
+   "journal_id": "inv-2026-0101-000000",
+   "agent_id": "a",
+   "agent_name": "A",
+   "started_at": "2026-01-01T00:00:00.000Z",
+   "completed_at": "2026-01-01T00:00:00.001Z",
+   "user_message": "",
+   "final_response": "",
+   "model_calls": [],
+   "tool_calls": [],
+   "total_tokens": 0,
+   "sealed": true
+  },
+  "canonical": "{\"agent_id\":\"a\",\"agent_name\":\"A\",\"completed_at\":\"2026-01-01T00:00:00.001Z\",\"final_response\":\"\",\"journal_id\":\"inv-2026-0101-000000\",\"model_calls\":[],\"sealed\":true,\"started_at\":\"2026-01-01T00:00:00.000Z\",\"tool_calls\":[],\"total_tokens\":0,\"user_message\":\"\"}",
+  "integrity_hash": "0cd98633837431c64380ea46cf2b5512b47cedb087055a45b12ff0f6f0c7b225"
+ }
+]

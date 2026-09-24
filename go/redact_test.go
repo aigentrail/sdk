@@ -56,7 +56,7 @@ func TestRedactPIILeavesLookAlikes(t *testing.T) {
 var placeholderTokenRe = regexp.MustCompile(`\[(AWS_KEY|CREDIT_CARD|EMAIL|IBAN|PHONE|SECRET|SSN)\]`)
 
 func TestRedactPIIConformsToGentrailCorpus(t *testing.T) {
-	raw, err := os.ReadFile("pii_conformance.json")
+	raw, err := os.ReadFile("../spec/pii_conformance.json")
 	if err != nil {
 		t.Fatalf("read corpus: %v", err)
 	}
@@ -139,5 +139,84 @@ func TestRedactingExporterScrubsValueAttributes(t *testing.T) {
 	}
 	if got["agent.name"] != "ops@corp.com" {
 		t.Errorf("agent.name = %q, want untouched (not a value field)", got["agent.name"])
+	}
+}
+
+func exportThroughRedactingExporter(t *testing.T, attrs ...attribute.KeyValue) sdktrace.ReadOnlySpan {
+	t.Helper()
+	sink := &captureExporter{}
+	provider := sdktrace.NewTracerProvider(sdktrace.WithSyncer(redactingExporter{SpanExporter: sink}))
+	defer provider.Shutdown(context.Background())
+	_, span := provider.Tracer("app").Start(context.Background(), "chat")
+	span.SetAttributes(attrs...)
+	span.End()
+	if len(sink.spans) != 1 {
+		t.Fatalf("exported %d spans, want 1", len(sink.spans))
+	}
+	return sink.spans[0]
+}
+
+func TestRedactingExporterScrubsForeignGenAISpansAndStamps(t *testing.T) {
+	span := exportThroughRedactingExporter(t,
+		attribute.String("gen_ai.prompt", "mail jane.doe@example.com now"),
+		attribute.String("gen_ai.system", "openai"),
+		attribute.StringSlice("ai.response.texts", []string{"ssn 123-45-6789", "clean"}),
+		attribute.Int64("gen_ai.usage.input_tokens", 12),
+		attribute.String("user.email", "ops@corp.com"),
+	)
+	attrs := attrMap(span.Attributes())
+	if got := attrs["gen_ai.prompt"].AsString(); got != "mail [EMAIL] now" {
+		t.Errorf("gen_ai.prompt = %q, want redacted", got)
+	}
+	if got := attrs["gen_ai.system"].AsString(); got != "openai" {
+		t.Errorf("gen_ai.system = %q, want untouched", got)
+	}
+	if got := attrs["ai.response.texts"].AsStringSlice(); !slices.Equal(got, []string{"ssn [SSN]", "clean"}) {
+		t.Errorf("ai.response.texts = %v, want each element redacted", got)
+	}
+	if got := attrs["gen_ai.usage.input_tokens"].AsInt64(); got != 12 {
+		t.Errorf("gen_ai.usage.input_tokens = %d, want untouched", got)
+	}
+	if got := attrs["user.email"].AsString(); got != "ops@corp.com" {
+		t.Errorf("user.email = %q, want untouched outside the redacted prefixes", got)
+	}
+	if stamp, ok := attrs[redactionAppliedAttributeKey]; !ok || !stamp.AsBool() {
+		t.Errorf("%s = %v (present %v), want true", redactionAppliedAttributeKey, stamp.Emit(), ok)
+	}
+}
+
+func TestRedactingExporterLeavesCleanSpansUnchangedAndUnstamped(t *testing.T) {
+	span := exportThroughRedactingExporter(t,
+		attribute.String("gen_ai.prompt", "summarize the quarterly report"),
+		attribute.String("gen_ai.system", "openai"),
+	)
+	if _, wrapped := span.(redactedSpan); wrapped {
+		t.Error("a span with no PII must be exported as the original span")
+	}
+	attrs := attrMap(span.Attributes())
+	if _, ok := attrs[redactionAppliedAttributeKey]; ok {
+		t.Errorf("clean span carries %s", redactionAppliedAttributeKey)
+	}
+	if got := attrs["gen_ai.prompt"].AsString(); got != "summarize the quarterly report" {
+		t.Errorf("gen_ai.prompt = %q, want unchanged", got)
+	}
+}
+
+func TestRedactingExporterKeepsASingleStamp(t *testing.T) {
+	span := exportThroughRedactingExporter(t,
+		attribute.Bool(redactionAppliedAttributeKey, false),
+		attribute.String("output.value", "call 555-123-4567"),
+	)
+	stamps := 0
+	for _, kv := range span.Attributes() {
+		if kv.Key == redactionAppliedAttributeKey {
+			stamps++
+			if !kv.Value.AsBool() {
+				t.Error("stamp must be true after redaction")
+			}
+		}
+	}
+	if stamps != 1 {
+		t.Errorf("found %d redaction stamps, want 1", stamps)
 	}
 }

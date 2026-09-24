@@ -79,6 +79,34 @@
             "want": []
         },
         {
+            "name": "placeholder blocks a glued phone like the value it replaced",
+            "fields": [
+                "[EMAIL]+00000000"
+            ],
+            "want": [
+                "EMAIL"
+            ]
+        },
+        {
+            "name": "glued chain stays undetected after its head is redacted",
+            "fields": [
+                "0@0.AA+00000000+00000000+00000000+00000000"
+            ],
+            "want": [
+                "EMAIL"
+            ]
+        },
+        {
+            "name": "placeholder followed by separated phone",
+            "fields": [
+                "[EMAIL] phone +44 20 7946 0958"
+            ],
+            "want": [
+                "EMAIL",
+                "PHONE"
+            ]
+        },
+        {
             "name": "raw email",
             "fields": [
                 "reach jane.doe@example.com please"

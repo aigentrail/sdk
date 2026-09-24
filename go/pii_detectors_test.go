@@ -120,7 +120,7 @@ func TestParseIBANRegistryRejectsMalformedRegistries(t *testing.T) {
 }
 
 func FuzzRedactPIILeavesNothingDetectable(f *testing.F) {
-	for _, seed := range []string{"ssn 123-45-6789", "a@b.com 4111111111111111", "phone 555-123-4567", "api_key = \"q8Zr4TmN2vX7pL1kW9sB\""} {
+	for _, seed := range []string{"ssn 123-45-6789", "a@b.com 4111111111111111", "phone 555-123-4567", "api_key = \"q8Zr4TmN2vX7pL1kW9sB\"", "0@0.AA+00000000+00000000+00000000+00000000"} {
 		f.Add(seed)
 	}
 	f.Fuzz(func(t *testing.T, field string) {
