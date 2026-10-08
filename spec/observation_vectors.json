@@ -1,0 +1,22 @@
+[
+  {
+    "arguments": "{}",
+    "canonical": "{}",
+    "sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+  },
+  {
+    "arguments": "{\"z\":1.0,\"a\":\"<雪>\"}",
+    "canonical": "{\"a\":\"<雪>\",\"z\":1}",
+    "sha256": "a2a57136b9b16f2b3acdd2175b0601298d4e97cb4a6cd402fd7b1a19498e3c47"
+  },
+  {
+    "arguments": "{\"nested\":{\"x\":\"<&>\"},\"a\":[0.00000015,1e21,0.1,-0.0,null,false]}",
+    "canonical": "{\"a\":[1.5e-7,1e+21,0.1,0,null,false],\"nested\":{\"x\":\"<&>\"}}",
+    "sha256": "3845ea628c4fafd64ea3f0c2eee7b75de4741b4cac499846d40e99fe3457db13"
+  },
+  {
+    "arguments": "{\"￿\":2,\"𐀀\":1}",
+    "canonical": "{\"𐀀\":1,\"￿\":2}",
+    "sha256": "0fb1ca74b1cef468cf02400d7482be699443487cdd7439c2fb4ad356839b82af"
+  }
+]

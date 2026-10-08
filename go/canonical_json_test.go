@@ -2,6 +2,7 @@ package gentrail
 
 import (
 	"encoding/json"
+	"github.com/aigentrail/sdk/go/canonicaljson"
 	"math"
 	"strings"
 	"testing"
@@ -148,18 +149,18 @@ func TestCanonicalJSONRejectsUnsupportedValues(t *testing.T) {
 
 func TestCanonicalJSONBoundsNestingDepth(t *testing.T) {
 	var deepest any = "leaf"
-	for range canonicalJSONDepthMax {
+	for range canonicaljson.DepthMax {
 		deepest = []any{deepest}
 	}
 	got, err := CanonicalJSON(deepest)
 	if err != nil {
-		t.Fatalf("depth %d: %v", canonicalJSONDepthMax, err)
+		t.Fatalf("depth %d: %v", canonicaljson.DepthMax, err)
 	}
-	if want := strings.Repeat("[", canonicalJSONDepthMax) + `"leaf"` + strings.Repeat("]", canonicalJSONDepthMax); got != want {
-		t.Errorf("depth %d serialized wrong", canonicalJSONDepthMax)
+	if want := strings.Repeat("[", canonicaljson.DepthMax) + `"leaf"` + strings.Repeat("]", canonicaljson.DepthMax); got != want {
+		t.Errorf("depth %d serialized wrong", canonicaljson.DepthMax)
 	}
 	if _, err := CanonicalJSON([]any{deepest}); err == nil {
-		t.Errorf("depth %d: want error", canonicalJSONDepthMax+1)
+		t.Errorf("depth %d: want error", canonicaljson.DepthMax+1)
 	}
 }
 

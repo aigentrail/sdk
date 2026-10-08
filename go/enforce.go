@@ -46,10 +46,13 @@ const enforcerUserAgent = "gentrail-sdk-go"
 
 // Verdict is the backend's decision for a proposed tool call.
 type Verdict struct {
-	Decision string    `json:"decision"`
-	Rule     string    `json:"rule,omitempty"`
-	Message  string    `json:"message,omitempty"`
-	Approval *Approval `json:"approval,omitempty"`
+	Outcome         string             `json:"outcome,omitempty"`
+	Reference       *DecisionReference `json:"observation_reference,omitempty"`
+	ObservationsURL string             `json:"observations_url,omitempty"`
+	Decision        string             `json:"decision"`
+	Rule            string             `json:"rule,omitempty"`
+	Message         string             `json:"message,omitempty"`
+	Approval        *Approval          `json:"approval,omitempty"`
 }
 
 // Approval locates the human-approval hold a GATE verdict created. Pass it to
@@ -195,6 +198,7 @@ func (e *Enforcer) Decide(ctx context.Context, toolName string, toolArgs map[str
 	if err := json.NewDecoder(resp.Body).Decode(&verdict); err != nil {
 		return allow
 	}
+	verdict.validateObservationReference(payload)
 	return verdict
 }
 

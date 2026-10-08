@@ -66,13 +66,15 @@
 //	})
 //	allowed, message := g.Enforcer.Enforce(ctx, "issue_refund", args, gentrail.WithAgentID("billing-agent"))
 //	if !allowed {
-//		g.Tracer.RecordToolCall(ctx, gentrail.ToolCallParams{
+//		if err := g.Tracer.RecordToolCall(ctx, gentrail.ToolCallParams{
 //			AgentID:          "billing-agent",
 //			AgentName:        "Billing Agent",
 //			Name:             "issue_refund",
 //			Result:           message,
 //			EnforcedDecision: gentrail.DecisionBlock,
-//		})
+//		}); err != nil {
+//			return err
+//		}
 //	}
 //	inv.End(gentrail.InvocationEndParams{Response: response})
 package gentrail
