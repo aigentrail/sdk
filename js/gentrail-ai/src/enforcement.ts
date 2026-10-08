@@ -1,5 +1,11 @@
 import { randomUUID } from "node:crypto";
 
+import {
+  checkedReference,
+  type DecisionOutcome,
+  type DecisionReference,
+} from "./observationReference.js";
+
 import { trace } from "@opentelemetry/api";
 
 export interface Approval {
@@ -7,6 +13,9 @@ export interface Approval {
 }
 
 export interface Verdict {
+  outcome?: DecisionOutcome;
+  observation_reference?: DecisionReference;
+  observations_url?: string;
   decision?: string;
   rule?: string;
   message?: string;
@@ -28,6 +37,7 @@ export interface DecideOptions {
 }
 
 export interface EnforcementOutcome {
+  verdict: Verdict;
   allowed: boolean;
   message: string;
   decision: string;
@@ -93,7 +103,7 @@ export class PolicyEnforcer {
       return await this.postDecide(payload);
     } catch (err) {
       console.warn(`gentrail decide failed (${String(err)}); allowing tool ${toolName}`);
-      return { decision: "ALLOW" };
+      return { decision: "ALLOW", outcome: "unavailable" };
     }
   }
 
@@ -131,21 +141,22 @@ export class PolicyEnforcer {
     const decision = verdict.decision ?? "";
     const rule = verdict.rule ?? "";
     if (decision === "BLOCK") {
-      return { allowed: false, message: verdictMessage(verdict), decision, rule };
+      return { verdict, allowed: false, message: verdictMessage(verdict), decision, rule };
     }
     if (decision === "GATE") {
       const status = await this.awaitGate(verdict.approval);
       if (status === "approved") {
-        return { allowed: true, message: "", decision, rule };
+        return { verdict, allowed: true, message: "", decision, rule };
       }
       return {
+        verdict,
         allowed: false,
         message: `${verdictMessage(verdict)} (approval ${status})`,
         decision,
         rule,
       };
     }
-    return { allowed: true, message: "", decision, rule };
+    return { verdict, allowed: true, message: "", decision, rule };
   }
 
   private async postDecide(payload: Record<string, unknown>): Promise<Verdict> {
@@ -162,7 +173,7 @@ export class PolicyEnforcer {
     if (!response.ok) {
       throw new Error(`decide returned ${response.status}`);
     }
-    return parseVerdict(await response.json());
+    return parseVerdict(await response.json(), payload);
   }
 
   private async pollGateOnce(pollUrl: string): Promise<string> {
@@ -187,11 +198,27 @@ export class PolicyEnforcer {
   }
 }
 
-function parseVerdict(body: unknown): Verdict {
+function parseVerdict(body: unknown, request: Record<string, unknown>): Verdict {
   if (!isRecord(body)) {
     throw new Error("decide verdict is not a JSON object");
   }
-  const verdict: Verdict = {};
+  let outcome: DecisionOutcome =
+    body.outcome === "verified" || body.outcome === "request_conflict"
+      ? body.outcome
+      : "unavailable";
+  if (body.decision !== "ALLOW" && body.decision !== "BLOCK" && body.decision !== "GATE") {
+    outcome = "unavailable";
+  }
+  const verdict: Verdict = { outcome };
+  if (outcome === "verified") {
+    const reference = checkedReference(body.observation_reference, request);
+    if (reference !== undefined) {
+      verdict.observation_reference = reference;
+    }
+  }
+  if (typeof body.observations_url === "string") {
+    verdict.observations_url = body.observations_url;
+  }
   if (typeof body.decision === "string") {
     verdict.decision = body.decision;
   }

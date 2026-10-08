@@ -16,6 +16,7 @@ import {
   gentrailApiKeyFromEnv,
   redactionEnabledFromEnv,
 } from "./otlpConfig.js";
+import { observationAttributes, type DecisionReference } from "./observationReference.js";
 import { redactPII } from "./pii.js";
 
 export const GOVERNANCE_SOURCE = "aigentrail-sdk";
@@ -59,6 +60,7 @@ export interface ModelCall {
 }
 
 export interface ToolCall {
+  decisionReference?: DecisionReference;
   agentId: string;
   agentName: string;
   name: string;
@@ -150,21 +152,25 @@ export class GovernanceTracer {
 
   recordToolCall(parent: InvocationHandle, call: ToolCall): void {
     const span = this.tracer.startSpan(call.name, {}, trace.setSpan(context.active(), parent.span));
-    span.setAttributes({
-      "openinference.span.kind": "TOOL",
-      "tool.name": call.name,
-      "aigentrail.agent.id": call.agentId,
-      "agent.name": call.agentName,
-      "input.value": this.attributeValue(call.args),
-      "output.value": this.attributeValue(call.result),
-    });
-    if (call.durationMs !== undefined) {
-      span.setAttribute("aigentrail.latency_ms", call.durationMs);
+    try {
+      span.setAttributes({
+        "openinference.span.kind": "TOOL",
+        "tool.name": call.name,
+        "aigentrail.agent.id": call.agentId,
+        "agent.name": call.agentName,
+        "input.value": this.attributeValue(call.args),
+        "output.value": this.attributeValue(call.result),
+      });
+      if (call.durationMs !== undefined) {
+        span.setAttribute("aigentrail.latency_ms", call.durationMs);
+      }
+      if (call.enforcedDecision) {
+        span.setAttribute("aigentrail.enforcement.decision", call.enforcedDecision);
+      }
+      span.setAttributes(observationAttributes(call.decisionReference, call.args));
+    } finally {
+      span.end();
     }
-    if (call.enforcedDecision) {
-      span.setAttribute("aigentrail.enforcement.decision", call.enforcedDecision);
-    }
-    span.end();
   }
 
   recordLLMCall(call: LLMCall): void {

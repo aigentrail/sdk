@@ -180,3 +180,25 @@ python3 tests/test_enforcement.py
 python3 tests/test_init.py
 python3 tests/test_parity_spec.py
 ```
+
+### Linking tool results to decisions
+
+`PolicyEnforcer.decide()` and `AsyncPolicyEnforcer.decide()` return an explicit
+`outcome`: `verified`, `request_conflict`, or `unavailable`. A transport failure
+still follows the existing fail-open behavior, with `outcome="unavailable"`.
+`BLOCK` and unresolved `GATE` decisions retain their enforcement behavior.
+
+A verified, attributed response can include an immutable `DecisionReference` in
+`verdict["observation_reference"]` and a server-provided `observations_url`.
+Pass that reference as `decision_reference` to `GovernanceTracer.record_tool_call()`
+after the tool actually runs. Supply the full actual arguments as JSON; the
+tracer hashes them before redaction and truncation. Changed arguments remain
+visible to the backend as an identity mismatch. Invalid references are discarded
+without changing permission; invalid recording input raises an error and leaves
+an ordinary, unlinked span.
+
+The Strands hook carries references automatically, keeps at most 128 pending
+calls, and skips cancelled calls. Evicted or missing references leave results
+unlinked. LangChain and OpenAI guardrails enforce permission; callers that record
+execution evidence use the tracer explicitly. References link producer reports
+and never grant permission or attest that a tool executed.

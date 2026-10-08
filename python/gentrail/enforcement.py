@@ -18,6 +18,9 @@ import os
 import time
 import urllib.request
 import uuid
+from typing import Any
+
+from .observation_reference import DECISION_OUTCOMES, checked_reference
 
 logger = logging.getLogger(__name__)
 
@@ -102,10 +105,16 @@ class PolicyEnforcer:
         )
         try:
             with urllib.request.urlopen(req, timeout=self.timeout) as resp:
-                return json.loads(resp.read().decode())
+                response = resp.read(2 * 1024 * 1024 + 1)
+                if len(response) > 2 * 1024 * 1024:
+                    raise ValueError("decide response exceeds size limit")
+                verdict = json.loads(response.decode())
+                return _checked_verdict(verdict, payload)
         except Exception as e:
-            logger.warning("enforcement decide failed (%s); allowing tool %s", e, tool_name)
-            return {"decision": "ALLOW"}
+            logger.warning(
+                "enforcement decide failed (%s); allowing tool %s", e, tool_name
+            )
+            return {"decision": "ALLOW", "outcome": "unavailable"}
 
     def await_gate(self, approval: dict, *, timeout: float | None = None) -> str:
         """Poll a GATE hold's status resource until it resolves, returning the
@@ -120,7 +129,9 @@ class PolicyEnforcer:
         if not status_url:
             return "timeout"
         poll_url = self.base + status_url
-        deadline = time.monotonic() + (self.gate_timeout if timeout is None else timeout)
+        deadline = time.monotonic() + (
+            self.gate_timeout if timeout is None else timeout
+        )
         while True:
             try:
                 status = self._poll_gate_once(poll_url)
@@ -306,3 +317,22 @@ def ambient_otel_trace_id() -> str:
         return format(ctx.trace_id, "032x")
     except Exception:
         return ""
+
+
+def _checked_verdict(verdict: Any, request: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(verdict, dict):
+        raise ValueError("decide verdict must be a JSON object")
+    outcome = verdict.get("outcome")
+    if not isinstance(outcome, str) or outcome not in DECISION_OUTCOMES:
+        outcome = "unavailable"
+    if verdict.get("decision") not in ("ALLOW", "BLOCK", "GATE"):
+        outcome = "unavailable"
+    verdict["outcome"] = outcome
+    reference = None
+    if outcome == "verified":
+        reference = checked_reference(verdict.get("observation_reference"), request)
+    if reference is None:
+        verdict.pop("observation_reference", None)
+    else:
+        verdict["observation_reference"] = reference
+    return verdict

@@ -1,3 +1,4 @@
+export { type DecisionReference, type DecisionOutcome } from "./observationReference.js";
 export { canonicalJson } from "./canonicalJson.js";
 export {
   ambientOtelTraceId,

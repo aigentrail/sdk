@@ -4,18 +4,19 @@ Loads enforcement.py directly so it runs without the SDK's runtime deps
 (pydantic, strands). Runnable as `python tests/test_enforcement.py` or via pytest.
 """
 
-import importlib.util
+import importlib
 import json
+import sys
+import types
 import os
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
-_spec = importlib.util.spec_from_file_location(
-    "enforcement", os.path.join(_HERE, "..", "gentrail", "enforcement.py")
-)
-_mod = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(_mod)
+_pkg = types.ModuleType("gentrail")
+_pkg.__path__ = [os.path.join(_HERE, "..", "gentrail")]
+sys.modules["gentrail"] = _pkg
+_mod = importlib.import_module("gentrail.enforcement")
 PolicyEnforcer = _mod.PolicyEnforcer
 
 
@@ -43,7 +44,11 @@ def _serve_once(response: dict) -> tuple[int, dict]:
 
 def test_block_verdict_with_auth_and_payload():
     port, captured = _serve_once(
-        {"decision": "BLOCK", "rule": "destructive_sql_pre", "message": "BLOCKED: destructive SQL on production."}
+        {
+            "decision": "BLOCK",
+            "rule": "destructive_sql_pre",
+            "message": "BLOCKED: destructive SQL on production.",
+        }
     )
     enf = PolicyEnforcer(f"http://127.0.0.1:{port}", "sk-test-key")
     v = enf.decide("run_sql", {"database": "production", "sql": "DROP TABLE customers"})
@@ -60,7 +65,10 @@ def test_fails_open_when_backend_unreachable():
 
 
 def test_from_env_requires_endpoint_and_key():
-    saved = {k: os.environ.pop(k, None) for k in ("GENTRAIL_DECIDE_ENDPOINT", "GENTRAIL_API_KEY")}
+    saved = {
+        k: os.environ.pop(k, None)
+        for k in ("GENTRAIL_DECIDE_ENDPOINT", "GENTRAIL_API_KEY")
+    }
     try:
         assert PolicyEnforcer.from_env() is None
         os.environ["GENTRAIL_DECIDE_ENDPOINT"] = "https://example.test"
@@ -105,7 +113,9 @@ def _serve_gets(responses: list) -> tuple[int, list]:
 def test_await_gate_returns_approved_when_hold_resolves():
     port, log = _serve_gets([{"status": "approved", "decided_by": "a@b.c"}])
     enf = PolicyEnforcer(f"http://127.0.0.1:{port}", "sk")
-    assert enf.await_gate({"status_url": "/api/v1/approvals/x"}, timeout=5) == "approved"
+    assert (
+        enf.await_gate({"status_url": "/api/v1/approvals/x"}, timeout=5) == "approved"
+    )
     assert log and log[0] == "/api/v1/approvals/x"
 
 
@@ -196,7 +206,12 @@ class _FakeEnforcer:
 def test_enforce_allow_forwards_identity():
     fake = _FakeEnforcer({"decision": "ALLOW"})
     allowed, message = _mod.enforce(
-        fake, "run_sql", {"sql": "SELECT 1"}, agent_id="a1", invocation_id="t1", request_id="r1"
+        fake,
+        "run_sql",
+        {"sql": "SELECT 1"},
+        agent_id="a1",
+        invocation_id="t1",
+        request_id="r1",
     )
     assert (allowed, message) == (True, "")
     assert fake.decide_kwargs["agent_id"] == "a1"
@@ -211,7 +226,12 @@ def test_enforce_block_uses_fallback_message_without_backend_message():
 
 def test_enforce_gate_denied_appends_status():
     fake = _FakeEnforcer(
-        {"decision": "GATE", "rule": "r1", "message": "Hold on", "approval": {"status_url": "/x"}},
+        {
+            "decision": "GATE",
+            "rule": "r1",
+            "message": "Hold on",
+            "approval": {"status_url": "/x"},
+        },
         gate_status="denied",
     )
     assert _mod.enforce(fake, "run_sql", {}) == (False, "Hold on (approval denied)")

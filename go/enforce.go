@@ -157,7 +157,7 @@ func synthesizedRequestID() string {
 // any transport or backend error returns ALLOW, because a backend outage must
 // never break the agent, only forgo enforcement for that call.
 func (e *Enforcer) Decide(ctx context.Context, toolName string, toolArgs map[string]any, opts ...DecideOption) Verdict {
-	allow := Verdict{Decision: DecisionAllow}
+	allow := Verdict{Decision: DecisionAllow, Outcome: "unavailable"}
 	if e == nil {
 		return allow
 	}
@@ -197,6 +197,16 @@ func (e *Enforcer) Decide(ctx context.Context, toolName string, toolArgs map[str
 	var verdict Verdict
 	if err := json.NewDecoder(resp.Body).Decode(&verdict); err != nil {
 		return allow
+	}
+	switch verdict.Outcome {
+	case "verified", "request_conflict":
+	default:
+		verdict.Outcome = "unavailable"
+	}
+	switch verdict.Decision {
+	case DecisionAllow, DecisionBlock, DecisionGate:
+	default:
+		verdict.Outcome = "unavailable"
 	}
 	verdict.validateObservationReference(payload)
 	return verdict
