@@ -95,13 +95,15 @@ the raw span.
 allowed, message := g.Enforcer.Enforce(ctx, "issue_refund", args,
 	gentrail.WithAgentID("billing-agent"))
 if !allowed {
-	g.Tracer.RecordToolCall(ctx, gentrail.ToolCallParams{
+	if err := g.Tracer.RecordToolCall(ctx, gentrail.ToolCallParams{
 		AgentID:          "billing-agent",
 		AgentName:        "Billing Agent",
 		Name:             "issue_refund",
 		Result:           message,
 		EnforcedDecision: gentrail.DecisionBlock,
-	})
+	}); err != nil {
+		return err.Error()
+	}
 	return message
 }
 ```
@@ -136,3 +138,20 @@ the same journal. `NewEvidenceLedger(now, newJournalID)` accepts an injected
 clock and id generator for tests; nil defaults to `time.Now` and
 `inv-YYYY-MMDD-xxxxxx` ids. The ledger also offers `Get`, `All`, `ByAgent`, and
 `Clear`.
+
+## Decision observation references
+
+`Decide` returns a typed `Verdict.Reference` and a server-provided
+`ObservationsURL` when the backend records an attributed decision. Pass that
+reference to `ToolCallParams.DecisionReference` when recording the actual tool
+call. `RecordToolCall` returns an error for malformed references or arguments;
+handle it as an evidence-reporting failure without changing the control result.
+
+The tool span carries the original request, invocation and proposal identities,
+plus SHA-256 over the actual arguments using the existing canonical JSON
+encoder. Hashing happens before telemetry truncation and redaction. Changed
+arguments therefore remain a mismatch rather than inheriting the proposal's
+hash. An observation reference reports correlation; it grants no permission and
+is not an attestation that a tool completed. Invalid response references are
+removed while preserving the original verdict. Existing unlinked telemetry
+continues to record normally.

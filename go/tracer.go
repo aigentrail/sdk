@@ -68,13 +68,14 @@ type ModelCallParams struct {
 // evaluator marks the matching violation as prevented rather than a fresh
 // alarm.
 type ToolCallParams struct {
-	AgentID          string
-	AgentName        string
-	Name             string
-	Args             string
-	Result           string
-	DurationMS       float64
-	EnforcedDecision string
+	DecisionReference *DecisionReference
+	AgentID           string
+	AgentName         string
+	Name              string
+	Args              string
+	Result            string
+	DurationMS        float64
+	EnforcedDecision  string
 }
 
 // LLMCallParams describes a single standalone LLM call for RecordLLMCall.
@@ -171,9 +172,9 @@ func (t *Tracer) RecordModelCall(ctx context.Context, p ModelCallParams) {
 // whatever span is in ctx. The agent.id / agent.name attributes let the
 // collector re-attach tool calls to their parent invocation even when the
 // BatchSpanProcessor flushes children before the parent ends.
-func (t *Tracer) RecordToolCall(ctx context.Context, p ToolCallParams) {
+func (t *Tracer) RecordToolCall(ctx context.Context, p ToolCallParams) error {
 	if t == nil {
-		return
+		return nil
 	}
 	_, span := t.tracer.Start(ctx, p.Name)
 	defer span.End()
@@ -191,6 +192,12 @@ func (t *Tracer) RecordToolCall(ctx context.Context, p ToolCallParams) {
 	if p.EnforcedDecision != "" {
 		span.SetAttributes(attribute.String(enforcementDecisionAttributeKey, p.EnforcedDecision))
 	}
+	attributes, err := observationReferenceAttributes(p.DecisionReference, p.Args)
+	if err != nil {
+		return err
+	}
+	span.SetAttributes(attributes...)
+	return nil
 }
 
 // RecordLLMCall opens an invocation, records one model call, and ends the

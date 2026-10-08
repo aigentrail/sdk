@@ -88,10 +88,12 @@ func TestSpansConformToSharedSpec(t *testing.T) {
 		AgentID: "agent-1", AgentName: "Agent", JournalID: "journal-1", UserMessage: "hello",
 	})
 	tracer.RecordModelCall(ctx, ModelCallParams{ModelID: "m", Prompt: "p", ResponseText: "r", InputTokens: 1, OutputTokens: 2, LatencyMS: 3})
-	tracer.RecordToolCall(ctx, ToolCallParams{
+	if err := tracer.RecordToolCall(ctx, ToolCallParams{
 		AgentID: "agent-1", AgentName: "Agent", Name: "search_web", Args: "{}", Result: "ok",
 		DurationMS: 4, EnforcedDecision: DecisionGate,
-	})
+	}); err != nil {
+		t.Fatal(err)
+	}
 	inv.End(InvocationEndParams{Response: "done", TotalTokens: 3, ToolCount: 1, IntegrityHash: "h"})
 
 	invocation := spanNamed(t, sink.spans, spec.Invocation.Name)
@@ -119,7 +121,9 @@ func TestSpanValuesTruncateToSharedRuneLimit(t *testing.T) {
 	oversized := strings.Repeat("世", spec.ValueRuneLimit+25)
 	ctx, inv := tracer.StartInvocation(context.Background(), InvocationParams{AgentID: "a", UserMessage: oversized})
 	tracer.RecordModelCall(ctx, ModelCallParams{ModelID: "m", Prompt: oversized, ResponseText: oversized})
-	tracer.RecordToolCall(ctx, ToolCallParams{Name: "t", Args: oversized, Result: oversized})
+	if err := tracer.RecordToolCall(ctx, ToolCallParams{Name: "t", Args: oversized, Result: oversized}); err != nil {
+		t.Fatal(err)
+	}
 	inv.End(InvocationEndParams{Response: oversized})
 
 	if len(sink.spans) != 3 {

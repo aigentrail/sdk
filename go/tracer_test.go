@@ -165,14 +165,16 @@ func TestRecordModelCallSkipsZeroLatency(t *testing.T) {
 func TestRecordToolCallNamesSpanAfterTool(t *testing.T) {
 	tracer, recorder := newTestTracer(t)
 	ctx, inv := tracer.StartInvocation(context.Background(), InvocationParams{AgentID: "a"})
-	tracer.RecordToolCall(ctx, ToolCallParams{
+	if err := tracer.RecordToolCall(ctx, ToolCallParams{
 		AgentID:    "a",
 		AgentName:  "Agent",
 		Name:       "search_web",
 		Args:       `{"q":"hi"}`,
 		Result:     "ok",
 		DurationMS: 7.5,
-	})
+	}); err != nil {
+		t.Fatal(err)
+	}
 	inv.End(InvocationEndParams{})
 
 	var tool sdktrace.ReadOnlySpan
@@ -203,7 +205,9 @@ func TestChildSpansNestUnderInvocation(t *testing.T) {
 	tracer, recorder := newTestTracer(t)
 	ctx, inv := tracer.StartInvocation(context.Background(), InvocationParams{AgentID: "a"})
 	tracer.RecordModelCall(ctx, ModelCallParams{ModelID: "m"})
-	tracer.RecordToolCall(ctx, ToolCallParams{Name: "t"})
+	if err := tracer.RecordToolCall(ctx, ToolCallParams{Name: "t"}); err != nil {
+		t.Fatal(err)
+	}
 	inv.End(InvocationEndParams{})
 
 	var invSpanID string
@@ -306,7 +310,9 @@ func TestNilTracerMethodsAreNoop(t *testing.T) {
 	var tracer *Tracer
 	ctx, inv := tracer.StartInvocation(context.Background(), InvocationParams{AgentID: "a"})
 	tracer.RecordModelCall(ctx, ModelCallParams{ModelID: "m"})
-	tracer.RecordToolCall(ctx, ToolCallParams{Name: "t"})
+	if err := tracer.RecordToolCall(ctx, ToolCallParams{Name: "t"}); err != nil {
+		t.Fatal(err)
+	}
 	tracer.RecordLLMCall(ctx, LLMCallParams{ModelID: "m"})
 	inv.End(InvocationEndParams{})
 	if err := tracer.ForceFlush(context.Background()); err != nil {
@@ -382,8 +388,12 @@ func TestNewWithoutAPIKeyReturnsErr(t *testing.T) {
 func TestRecordToolCallStampsEnforcedDecision(t *testing.T) {
 	tracer, recorder := newTestTracer(t)
 	ctx, inv := tracer.StartInvocation(context.Background(), InvocationParams{AgentID: "a"})
-	tracer.RecordToolCall(ctx, ToolCallParams{Name: "blocked_tool", EnforcedDecision: DecisionBlock})
-	tracer.RecordToolCall(ctx, ToolCallParams{Name: "allowed_tool"})
+	if err := tracer.RecordToolCall(ctx, ToolCallParams{Name: "blocked_tool", EnforcedDecision: DecisionBlock}); err != nil {
+		t.Fatal(err)
+	}
+	if err := tracer.RecordToolCall(ctx, ToolCallParams{Name: "allowed_tool"}); err != nil {
+		t.Fatal(err)
+	}
 	inv.End(InvocationEndParams{})
 
 	for _, s := range recorder.Ended() {
