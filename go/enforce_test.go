@@ -376,3 +376,25 @@ func TestUnavailableOutcomePreservesPermission(t *testing.T) {
 		t.Fatalf("unreachable verdict = %+v", verdict)
 	}
 }
+
+func TestMalformedReceiptMetadataNeverChangesPermission(t *testing.T) {
+	for _, metadata := range []map[string]any{
+		{"outcome": "verified", "observation_reference": map[string]any{"request_id": 123}},
+		{"outcome": []string{"verified"}, "observation_reference": "invalid"},
+		{"outcome": "verified", "observations_url": 123, "rule": []string{"invalid"}, "message": false},
+	} {
+		for _, decision := range []string{DecisionAllow, DecisionBlock, DecisionGate} {
+			metadata["decision"] = decision
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if err := json.NewEncoder(w).Encode(metadata); err != nil {
+					t.Error(err)
+				}
+			}))
+			verdict := newTestEnforcer(srv.URL).Decide(context.Background(), "send", nil, WithRequestID("request"), WithInvocationID("inv"))
+			srv.Close()
+			if verdict.Decision != decision || verdict.Reference != nil {
+				t.Fatalf("metadata changed permission: %+v", verdict)
+			}
+		}
+	}
+}
