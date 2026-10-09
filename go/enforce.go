@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"io"
 	"net/http"
 	"os"
 	"strconv"
@@ -157,7 +158,7 @@ func synthesizedRequestID() string {
 // any transport or backend error returns ALLOW, because a backend outage must
 // never break the agent, only forgo enforcement for that call.
 func (e *Enforcer) Decide(ctx context.Context, toolName string, toolArgs map[string]any, opts ...DecideOption) Verdict {
-	allow := Verdict{Decision: DecisionAllow}
+	allow := Verdict{Decision: DecisionAllow, Outcome: "unavailable"}
 	if e == nil {
 		return allow
 	}
@@ -194,9 +195,23 @@ func (e *Enforcer) Decide(ctx context.Context, toolName string, toolArgs map[str
 	if resp.StatusCode >= 400 {
 		return allow
 	}
-	var verdict Verdict
-	if err := json.NewDecoder(resp.Body).Decode(&verdict); err != nil {
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, 2*1024*1024+1))
+	if err != nil || len(raw) > 2*1024*1024 {
 		return allow
+	}
+	verdict, err := decodeVerdict(raw)
+	if err != nil {
+		return allow
+	}
+	switch verdict.Outcome {
+	case "verified", "request_conflict":
+	default:
+		verdict.Outcome = "unavailable"
+	}
+	switch verdict.Decision {
+	case DecisionAllow, DecisionBlock, DecisionGate:
+	default:
+		verdict.Outcome = "unavailable"
 	}
 	verdict.validateObservationReference(payload)
 	return verdict
@@ -296,4 +311,37 @@ func verdictMessage(verdict Verdict) string {
 		return verdict.Message
 	}
 	return strings.TrimSpace(verdict.Decision + " by policy " + verdict.Rule)
+}
+
+func decodeVerdict(raw []byte) (Verdict, error) {
+	var wire struct {
+		Decision        string          `json:"decision"`
+		Outcome         json.RawMessage `json:"outcome"`
+		Rule            json.RawMessage `json:"rule"`
+		Message         json.RawMessage `json:"message"`
+		Approval        json.RawMessage `json:"approval"`
+		Reference       json.RawMessage `json:"observation_reference"`
+		ObservationsURL json.RawMessage `json:"observations_url"`
+	}
+	if err := json.Unmarshal(raw, &wire); err != nil {
+		return Verdict{}, err
+	}
+	verdict := Verdict{Decision: wire.Decision, Outcome: verdictText(wire.Outcome), Rule: verdictText(wire.Rule), Message: verdictText(wire.Message), ObservationsURL: verdictText(wire.ObservationsURL)}
+	var reference DecisionReference
+	if err := json.Unmarshal(wire.Reference, &reference); err == nil {
+		verdict.Reference = &reference
+	}
+	var approval Approval
+	if err := json.Unmarshal(wire.Approval, &approval); err == nil {
+		verdict.Approval = &approval
+	}
+	return verdict, nil
+}
+
+func verdictText(raw json.RawMessage) string {
+	var text string
+	if err := json.Unmarshal(raw, &text); err != nil {
+		return ""
+	}
+	return text
 }

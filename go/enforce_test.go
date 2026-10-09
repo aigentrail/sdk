@@ -355,3 +355,46 @@ func TestNilEnforcerEnforceAllows(t *testing.T) {
 		t.Errorf("nil Enforce = (%v, %q), want (true, \"\")", allowed, message)
 	}
 }
+
+func TestUnavailableOutcomePreservesPermission(t *testing.T) {
+	for _, decision := range []string{DecisionAllow, DecisionBlock, DecisionGate} {
+		t.Run(string(decision), func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if err := json.NewEncoder(w).Encode(Verdict{Decision: decision}); err != nil {
+					t.Error(err)
+				}
+			}))
+			defer srv.Close()
+			verdict := newTestEnforcer(srv.URL).Decide(context.Background(), "send", nil)
+			if verdict.Decision != decision || verdict.Outcome != "unavailable" || verdict.Reference != nil {
+				t.Fatalf("verdict = %+v", verdict)
+			}
+		})
+	}
+	verdict := newTestEnforcer("http://127.0.0.1:1").Decide(context.Background(), "send", nil)
+	if verdict.Decision != DecisionAllow || verdict.Outcome != "unavailable" || verdict.Reference != nil {
+		t.Fatalf("unreachable verdict = %+v", verdict)
+	}
+}
+
+func TestMalformedReceiptMetadataNeverChangesPermission(t *testing.T) {
+	for _, metadata := range []map[string]any{
+		{"outcome": "verified", "observation_reference": map[string]any{"request_id": 123}},
+		{"outcome": []string{"verified"}, "observation_reference": "invalid"},
+		{"outcome": "verified", "observations_url": 123, "rule": []string{"invalid"}, "message": false},
+	} {
+		for _, decision := range []string{DecisionAllow, DecisionBlock, DecisionGate} {
+			metadata["decision"] = decision
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if err := json.NewEncoder(w).Encode(metadata); err != nil {
+					t.Error(err)
+				}
+			}))
+			verdict := newTestEnforcer(srv.URL).Decide(context.Background(), "send", nil, WithRequestID("request"), WithInvocationID("inv"))
+			srv.Close()
+			if verdict.Decision != decision || verdict.Reference != nil {
+				t.Fatalf("metadata changed permission: %+v", verdict)
+			}
+		}
+	}
+}

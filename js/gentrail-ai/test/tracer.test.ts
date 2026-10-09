@@ -9,6 +9,7 @@ import {
 } from "@opentelemetry/sdk-trace-base";
 
 import { createGovernanceTracer, GovernanceTracer } from "../src/index.js";
+import { argumentsHash } from "../src/observationReference.js";
 import { readSpecJson, serve, withEnv } from "./support.js";
 
 interface SpanSpec {
@@ -338,4 +339,39 @@ test("standard OTLP header variables replace the Bearer header", async () => {
     OTEL_EXPORTER_OTLP_TRACES_HEADERS: undefined,
   });
   assert.deepEqual(seen, { url: "/v1/traces", auth: "Custom abc" });
+});
+
+test("execution references hash full actual arguments before telemetry redaction", () => {
+  const { tracer, exporter } = inMemoryTracer();
+  const invocation = tracer.startInvocation({
+    agentId: "agent",
+    agentName: "Agent",
+    journalId: "inv",
+    userMessage: "test",
+  });
+  const original = argumentsHash('{"email":"proposed@example.com"}');
+  const args = JSON.stringify({ email: "actual@example.com", padding: "x".repeat(5000) });
+  tracer.recordToolCall(invocation, {
+    agentId: "agent",
+    agentName: "Agent",
+    name: "send",
+    args,
+    result: "ok",
+    decisionReference: {
+      request_id: "request",
+      invocation_id: "inv",
+      proposal_hash: "a".repeat(64),
+      arguments_hash: original,
+    },
+  });
+  const span = spanNamed(exporter.getFinishedSpans(), "send");
+  assert.equal(span.attributes["aigentrail.decision.arguments_hash"], argumentsHash(args));
+  assert.notEqual(span.attributes["aigentrail.decision.arguments_hash"], original);
+  assert.ok(!String(span.attributes["input.value"]).includes("actual@example.com"));
+  tracer.endInvocation(invocation, {
+    response: "done",
+    totalTokens: 0,
+    toolCount: 1,
+    integrityHash: "",
+  });
 });

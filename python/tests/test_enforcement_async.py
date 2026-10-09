@@ -6,18 +6,19 @@ via pytest.
 """
 
 import asyncio
-import importlib.util
+import importlib
 import json
+import sys
+import types
 import os
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
-_spec = importlib.util.spec_from_file_location(
-    "enforcement", os.path.join(_HERE, "..", "gentrail", "enforcement.py")
-)
-_mod = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(_mod)
+_pkg = types.ModuleType("gentrail")
+_pkg.__path__ = [os.path.join(_HERE, "..", "gentrail")]
+sys.modules["gentrail"] = _pkg
+_mod = importlib.import_module("gentrail.enforcement")
 AsyncPolicyEnforcer = _mod.AsyncPolicyEnforcer
 
 
@@ -106,7 +107,10 @@ def test_decide_sends_caller_identity_when_given():
 
 
 def test_from_env_requires_endpoint_and_key():
-    saved = {k: os.environ.pop(k, None) for k in ("GENTRAIL_DECIDE_ENDPOINT", "GENTRAIL_API_KEY")}
+    saved = {
+        k: os.environ.pop(k, None)
+        for k in ("GENTRAIL_DECIDE_ENDPOINT", "GENTRAIL_API_KEY")
+    }
     try:
         assert AsyncPolicyEnforcer.from_env() is None
         os.environ["GENTRAIL_DECIDE_ENDPOINT"] = "https://example.test"
@@ -126,7 +130,9 @@ def test_await_gate_polls_until_approved():
         [{"status": "pending"}, {"status": "pending"}, {"status": "approved"}]
     )
     enf = AsyncPolicyEnforcer(f"http://127.0.0.1:{port}", "sk")
-    status = asyncio.run(enf.await_gate({"status_url": "/api/v1/approvals/x"}, timeout=5))
+    status = asyncio.run(
+        enf.await_gate({"status_url": "/api/v1/approvals/x"}, timeout=5)
+    )
     assert status == "approved"
     assert len(log) >= 3
     assert log[0] == "/api/v1/approvals/x"

@@ -12,6 +12,8 @@ from __future__ import annotations
 import json
 import logging
 import time
+from dataclasses import dataclass
+from collections.abc import Callable
 from typing import Any
 
 from strands.hooks import HookProvider, HookRegistry
@@ -33,8 +35,23 @@ from .evidence_ledger import (
 )
 from .enforcement import PolicyEnforcer
 from .otel_exporter import GovernanceTracer
+from .observation_reference import DecisionReference
 
 logger = logging.getLogger("gentrail.hooks")
+
+
+@dataclass(frozen=True)
+class RunningToolCall:
+    started_at: float
+    reference: DecisionReference | None = None
+
+
+@dataclass(frozen=True)
+class CancelledToolCall:
+    decision: str
+
+
+TOOL_CALLS_PENDING_MAX = 128
 
 
 class GentrailGovernanceHook(HookProvider):
@@ -45,6 +62,7 @@ class GentrailGovernanceHook(HookProvider):
         ledger: EvidenceLedger | None = None,
         otel_tracer: GovernanceTracer | None = None,
         enforcer: "PolicyEnforcer | None" = None,
+        clock: Callable[[], float] = time.monotonic,
     ):
         self.ledger = ledger or evidence_ledger
         self._otel = otel_tracer
@@ -54,15 +72,11 @@ class GentrailGovernanceHook(HookProvider):
         self._current_journal: DecisionJournal | None = None
         self._tool_call_count = 0
         self._model_call_start: float | None = None
-        self._tool_call_start: float | None = None
+        self._clock = clock
         self._invocation_span: Any | None = None
         self._accumulated_usage_before_model_call: dict[str, int] | None = None
         self._system_prompt: str = ""
-        # Non-ALLOW verdicts from the before-tool-call hook, keyed by toolUseId
-        # (tool name when absent), consumed when the tool span records so it
-        # carries aigentrail.enforcement.decision - the marker the evaluator
-        # uses to stamp the resulting violation outcome=prevented.
-        self._enforced_decisions: dict[str, str] = {}
+        self._pending_tool_calls: dict[str, RunningToolCall | CancelledToolCall] = {}
 
     def register_hooks(self, registry: HookRegistry) -> None:
         registry.add_callback(BeforeInvocationEvent, self.capture_invocation_start)
@@ -77,7 +91,7 @@ class GentrailGovernanceHook(HookProvider):
         agent_name = event.agent.name
 
         self._tool_call_count = 0
-        self._enforced_decisions = {}
+        self._pending_tool_calls.clear()
         self._current_journal = self.ledger.create(agent_id, agent_name)
 
         user_msg = ""
@@ -103,7 +117,9 @@ class GentrailGovernanceHook(HookProvider):
                 user_message=user_msg,
             )
 
-        logger.info(f"[T4] Invocation started: journal={self._current_journal.journal_id}")
+        logger.info(
+            f"[T4] Invocation started: journal={self._current_journal.journal_id}"
+        )
 
     def capture_prompt_and_context(self, event: BeforeModelCallEvent) -> None:
         self._model_call_start = time.time()
@@ -145,8 +161,12 @@ class GentrailGovernanceHook(HookProvider):
         metrics = getattr(event.agent, "event_loop_metrics", None)
         if metrics and self._accumulated_usage_before_model_call is not None:
             acc = getattr(metrics, "accumulated_usage", {})
-            input_tokens = acc.get("inputTokens", 0) - self._accumulated_usage_before_model_call.get("inputTokens", 0)
-            output_tokens = acc.get("outputTokens", 0) - self._accumulated_usage_before_model_call.get("outputTokens", 0)
+            input_tokens = acc.get(
+                "inputTokens", 0
+            ) - self._accumulated_usage_before_model_call.get("inputTokens", 0)
+            output_tokens = acc.get(
+                "outputTokens", 0
+            ) - self._accumulated_usage_before_model_call.get("outputTokens", 0)
         self._accumulated_usage_before_model_call = None
 
         token_usage = {"input_tokens": input_tokens, "output_tokens": output_tokens}
@@ -177,8 +197,11 @@ class GentrailGovernanceHook(HookProvider):
             )
 
     def capture_tool_call_start(self, event: BeforeToolCallEvent) -> None:
-        self._tool_call_count += 1
-        self._tool_call_start = time.time()
+        key = event.tool_use.get("toolUseId") or event.tool_use.get("name", "unknown")
+        if key not in self._pending_tool_calls:
+            if len(self._pending_tool_calls) >= TOOL_CALLS_PENDING_MAX:
+                self._pending_tool_calls.pop(next(iter(self._pending_tool_calls)))
+        self._pending_tool_calls[key] = RunningToolCall(self._clock())
 
         tool_name = event.tool_use.get("name", "unknown")
 
@@ -202,27 +225,39 @@ class GentrailGovernanceHook(HookProvider):
                 tool_args,
                 agent_id=agent_id,
                 invocation_id=invocation_id,
-                request_id=event.tool_use.get("toolUseId")
-                or f"{invocation_id}:{self._tool_call_count}",
+                request_id=event.tool_use.get("toolUseId"),
             )
             decision = verdict.get("decision")
             rule = verdict.get("rule", "")
             msg = verdict.get("message") or f"{decision} by policy {rule}".strip()
-            key = event.tool_use.get("toolUseId") or tool_name
             if decision == "BLOCK":
                 event.cancel_tool = msg
-                self._enforced_decisions[key] = "BLOCK"
+                self._pending_tool_calls[key] = CancelledToolCall("BLOCK")
                 logger.warning("[T4] BLOCK tool %s (rule=%s): %s", tool_name, rule, msg)
             elif decision == "GATE":
                 status = self._enforcer.await_gate(verdict.get("approval") or {})
                 if status == "approved":
                     logger.info(
-                        "[T4] GATE approved for tool %s (rule=%s); proceeding", tool_name, rule
+                        "[T4] GATE approved for tool %s (rule=%s); proceeding",
+                        tool_name,
+                        rule,
                     )
                 else:
                     event.cancel_tool = f"{msg} (approval {status})"
-                    self._enforced_decisions[key] = "GATE"
-                    logger.warning("[T4] GATE %s for tool %s (rule=%s)", status, tool_name, rule)
+                    self._pending_tool_calls[key] = CancelledToolCall("GATE")
+                    logger.warning(
+                        "[T4] GATE %s for tool %s (rule=%s)", status, tool_name, rule
+                    )
+
+            state = self._pending_tool_calls.get(key)
+            reference = verdict.get("observation_reference")
+            if isinstance(state, RunningToolCall) and isinstance(
+                reference, DecisionReference
+            ):
+                if event.tool_use.get("toolUseId"):
+                    self._pending_tool_calls[key] = RunningToolCall(
+                        state.started_at, reference
+                    )
 
     def _invocation_trace_id(self) -> str:
         """The invocation span's OTel trace id as 32-char hex, "" without tracing.
@@ -241,10 +276,21 @@ class GentrailGovernanceHook(HookProvider):
         agent_id = event.agent.agent_id
         agent_name = event.agent.name
 
-        latency_ms = None
-        if self._tool_call_start:
-            latency_ms = (time.time() - self._tool_call_start) * 1000
-            self._tool_call_start = None
+        key = event.tool_use.get("toolUseId") or event.tool_use.get("name", "unknown")
+        state = self._pending_tool_calls.pop(key, None)
+        if isinstance(state, CancelledToolCall) or getattr(
+            event, "cancel_message", None
+        ):
+            return
+        if event.selected_tool is None:
+            return
+        self._tool_call_count += 1
+        latency_ms = (
+            (self._clock() - state.started_at) * 1000
+            if isinstance(state, RunningToolCall)
+            else None
+        )
+        reference = state.reference if isinstance(state, RunningToolCall) else None
 
         tool_name = event.tool_use.get("name", "unknown")
         tool_args = event.tool_use.get("input", {})
@@ -262,25 +308,31 @@ class GentrailGovernanceHook(HookProvider):
                 result_str = str(event.result)[:500]
 
         if self._current_journal:
-            self._current_journal.tool_calls.append(ToolCallRecord(
-                tool_name=tool_name,
-                tool_args=tool_args if isinstance(tool_args, dict) else {},
-                result=result_str[:200],
-                duration_ms=latency_ms,
-            ))
+            self._current_journal.tool_calls.append(
+                ToolCallRecord(
+                    tool_name=tool_name,
+                    tool_args=tool_args if isinstance(tool_args, dict) else {},
+                    result=result_str[:200],
+                    duration_ms=latency_ms,
+                )
+            )
 
         if self._otel and self._invocation_span:
-            key = event.tool_use.get("toolUseId") or tool_name
-            self._otel.record_tool_call(
-                self._invocation_span,
-                agent_id=agent_id,
-                agent_name=agent_name,
-                name=tool_name,
-                args=json.dumps(tool_args if isinstance(tool_args, dict) else {})[:500],
-                result=result_str[:500],
-                duration_ms=latency_ms,
-                enforced_decision=self._enforced_decisions.pop(key, None),
-            )
+            try:
+                self._otel.record_tool_call(
+                    self._invocation_span,
+                    agent_id=agent_id,
+                    agent_name=agent_name,
+                    name=tool_name,
+                    args=json.dumps(tool_args if isinstance(tool_args, dict) else {}),
+                    result=result_str[:500],
+                    duration_ms=latency_ms,
+                    decision_reference=reference,
+                )
+            except (TypeError, ValueError, OverflowError, RecursionError):
+                logger.warning(
+                    "Tool execution reference could not be recorded: %s", tool_name
+                )
 
     def seal_decision_journal(self, event: AfterInvocationEvent) -> None:
         if not self._current_journal:

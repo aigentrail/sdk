@@ -52,7 +52,7 @@ test("decide sends the client identity and synthesizes a request id", async () =
   try {
     const enforcer = new PolicyEnforcer({ endpoint: srv.base + "/", apiKey: "sk-test" });
     const verdict = await enforcer.decide("lookup", { id: 1 });
-    assert.deepEqual(verdict, { decision: "ALLOW" });
+    assert.deepEqual(verdict, { decision: "ALLOW", outcome: "unavailable" });
     const [request] = srv.requests;
     assert.equal(request.url, "/api/v1/decide");
     assert.equal(request.userAgent, "gentrail-sdk-js");
@@ -94,7 +94,13 @@ test("decide fails open on a malformed verdict", async () => {
   try {
     const enforcer = new PolicyEnforcer({ endpoint: srv.base, apiKey: "sk-test" });
     const outcome = await enforcer.enforce("lookup", {});
-    assert.deepEqual(outcome, { allowed: true, message: "", decision: "ALLOW", rule: "" });
+    assert.deepEqual(outcome, {
+      allowed: true,
+      message: "",
+      decision: "ALLOW",
+      rule: "",
+      verdict: { decision: "ALLOW", outcome: "unavailable" },
+    });
   } finally {
     await srv.close();
   }
@@ -133,4 +139,42 @@ test("fromEnv needs both the decide endpoint and the API key", async () => {
       assert.equal(enforcer?.gatePollIntervalMs, 2000);
     },
   );
+});
+
+test("decide validates observation references without changing BLOCK or GATE", async () => {
+  const reference = {
+    request_id: "request",
+    invocation_id: "inv",
+    proposal_hash: "a".repeat(64),
+    arguments_hash: "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+  };
+  for (const decision of ["ALLOW", "BLOCK", "GATE"]) {
+    for (const requestId of ["request", "wrong"]) {
+      const srv = await serve(() => ({
+        json: {
+          decision,
+          outcome: "verified",
+          observation_reference: { ...reference, request_id: requestId },
+          observations_url: "/api/v1/decisions/request/observations",
+        },
+      }));
+      try {
+        const enforcer = new PolicyEnforcer({ endpoint: srv.base, apiKey: "sk-test" });
+        const verdict = await enforcer.decide(
+          "send",
+          {},
+          { requestId: "request", invocationId: "inv" },
+        );
+        assert.equal(verdict.decision, decision);
+        assert.equal(verdict.outcome, "verified");
+        assert.deepEqual(
+          verdict.observation_reference,
+          requestId === "request" ? reference : undefined,
+        );
+        assert.equal(srv.requests.length, 1);
+      } finally {
+        await srv.close();
+      }
+    }
+  }
 });

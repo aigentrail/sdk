@@ -261,3 +261,22 @@ tests.
 npm install
 npm test
 ```
+
+### Linking tool results to decisions
+
+`PolicyEnforcer.decide()` returns `outcome` as `verified`, `request_conflict`, or
+`unavailable`. Transport errors retain fail-open permission with an explicit
+unavailable outcome. `enforce()` also returns the original verdict in `verdict`.
+
+A verified, attributed verdict can carry `observation_reference` and a
+server-provided `observations_url`. Pass the reference as `decisionReference`
+to `GovernanceTracer.recordToolCall()` after execution, using the full actual
+arguments as JSON in `args`. The tracer hashes those arguments before redaction
+and truncation, so changed arguments cannot borrow the proposal's identity.
+Malformed references are discarded without changing permission. Invalid recording
+input throws and closes an ordinary, unlinked span.
+
+`guardTools()` enforces permission. Callers that capture execution evidence use
+the tracer explicitly. References link producer reports; they do not grant
+permission or attest that a tool executed. No additional decision request is
+needed to record a result.

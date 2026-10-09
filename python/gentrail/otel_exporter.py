@@ -15,6 +15,7 @@ from typing import Any
 from .export_filter import GenAISignalExporter
 from .http_instrumentation import async_governance_transport, governance_transport
 from .pii import redact_pii
+from .observation_reference import DecisionReference, observation_attributes
 
 logger = logging.getLogger("gentrail.otel")
 
@@ -28,14 +29,21 @@ _status_mod: Any = None
 
 def _try_import_otel() -> bool:
     """Import OTel packages. Returns True on success, False if not installed."""
-    global _trace_mod, _sdk_trace_mod, _otlp_exporter_mod, _batch_processor_mod, _status_mod
+    global \
+        _trace_mod, \
+        _sdk_trace_mod, \
+        _otlp_exporter_mod, \
+        _batch_processor_mod, \
+        _status_mod
     if _trace_mod is not None:
         return True
     try:
         import opentelemetry.trace as trace_mod
         import opentelemetry.sdk.trace as sdk_trace_mod
         from opentelemetry.sdk.trace import export as batch_processor_mod
-        from opentelemetry.exporter.otlp.proto.http import trace_exporter as otlp_exporter_mod
+        from opentelemetry.exporter.otlp.proto.http import (
+            trace_exporter as otlp_exporter_mod,
+        )
         from opentelemetry.trace import status as status_mod
 
         _trace_mod = trace_mod
@@ -110,7 +118,9 @@ class GovernanceTracer:
         latency_ms: float | None,
     ) -> None:
         ctx = _trace_mod.set_span_in_context(parent)
-        with self._tracer.start_as_current_span("governance.model_call", context=ctx) as span:
+        with self._tracer.start_as_current_span(
+            "governance.model_call", context=ctx
+        ) as span:
             span.set_attribute("openinference.span.kind", "LLM")
             span.set_attribute("llm.model_name", model_id)
             span.set_attribute("input.value", self._value(prompt))
@@ -131,9 +141,12 @@ class GovernanceTracer:
         result: str,
         duration_ms: float | None,
         enforced_decision: str | None = None,
+        decision_reference: DecisionReference | None = None,
     ) -> None:
         ctx = _trace_mod.set_span_in_context(parent)
-        with self._tracer.start_as_current_span(name, context=ctx) as span:
+        with self._tracer.start_as_current_span(
+            name, context=ctx, record_exception=False, set_status_on_exception=False
+        ) as span:
             span.set_attribute("openinference.span.kind", "TOOL")
             span.set_attribute("tool.name", name)
             # agent_id and agent_name let the collector attach this tool_call
@@ -151,6 +164,8 @@ class GovernanceTracer:
             # dashboard reads the fire as enforcement working, not a fresh alarm.
             if enforced_decision:
                 span.set_attribute("aigentrail.enforcement.decision", enforced_decision)
+            for key, value in observation_attributes(decision_reference, args).items():
+                span.set_attribute(key, value)
 
     def record_llm_call(
         self,
@@ -195,7 +210,9 @@ class GovernanceTracer:
         self.end_invocation(
             parent,
             response=response_text,
-            total_tokens=input_tokens + output_tokens if total_tokens is None else total_tokens,
+            total_tokens=input_tokens + output_tokens
+            if total_tokens is None
+            else total_tokens,
             tool_count=0,
             integrity_hash="",
             status=status,
@@ -247,7 +264,9 @@ def create_governance_tracer(redact: bool | None = None) -> GovernanceTracer | N
     # redaction and the GenAI filter instead. Parenting still works because
     # the OTel context is shared across providers.
     provider = _sdk_trace_mod.TracerProvider()
-    provider.add_span_processor(_batch_processor_mod.BatchSpanProcessor(GenAISignalExporter(exporter)))
+    provider.add_span_processor(
+        _batch_processor_mod.BatchSpanProcessor(GenAISignalExporter(exporter))
+    )
     tracer = provider.get_tracer("aigentrail.governance")
     return GovernanceTracer(tracer, provider, redact=redact)
 
@@ -285,7 +304,11 @@ def _build_otlp_exporter(api_key: str) -> Any | None:
 
     endpoint = os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT", DEFAULT_ENDPOINT)
     ca_cert = os.environ.get("OTEL_EXPORTER_OTLP_CERTIFICATE", "")
-    insecure = os.environ.get("OTEL_EXPORTER_OTLP_INSECURE", "").lower() in ("true", "1", "yes")
+    insecure = os.environ.get("OTEL_EXPORTER_OTLP_INSECURE", "").lower() in (
+        "true",
+        "1",
+        "yes",
+    )
 
     exporter_kwargs: dict[str, Any] = {
         "endpoint": f"{endpoint.rstrip('/')}/v1/traces",
