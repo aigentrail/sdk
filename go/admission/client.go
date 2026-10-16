@@ -72,6 +72,9 @@ type admissionReservation struct {
 }
 
 func (c Client) Authorize(ctx context.Context, requestID string, link Link) error {
+	if c.HTTP == nil || c.Now == nil {
+		return errors.New("admission: HTTP client and clock are required")
+	}
 	ctx, cancel := context.WithTimeout(ctx, 9*time.Second)
 	defer cancel()
 	if !link.valid() || requestID == "" {
