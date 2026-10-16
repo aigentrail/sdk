@@ -1,5 +1,31 @@
 # gentrail (Go)
 
+Strict tool-call quotas use an agent-bound API key and explicit fail-closed
+enforcement:
+
+```go
+enforcer := gentrail.NewEnforcer(endpoint, boundAgentKey, gentrail.WithStrictAdmission())
+allowed, message := enforcer.Enforce(ctx, "issue_refund", args,
+    gentrail.WithAgentID("billing-agent"), gentrail.WithRequestID(toolCallID))
+if !allowed {
+    return errors.New(message)
+}
+return issueRefund(args)
+```
+
+`Enforce` resolves policy and human approval, reserves capacity, and consumes the
+reservation once before returning permission. Initial decision outages also
+block in this mode. A retry with the same request ID cannot execute twice.
+Do not retry the tool because result reporting failed. A crash after consumption
+keeps the attempt charged. Low-level `Decide` and `AwaitGate` alone do not grant
+quota execution authority; use `Enforce` at the tool boundary.
+
+The dependency-free `admission` package implements the same bounded protocol
+for host integrations. It rejects foreign links, redirects, stale or malformed
+receipts and lost consume replies. Constructors without `WithStrictAdmission`
+retain their existing outage policy and do not advertise strict quota support.
+Python and JavaScript clients require separate adoption.
+
 The Go governance SDK for Gentrail. It emits OpenTelemetry spans for agent
 invocations, LLM calls, and tool calls over OTLP/HTTP, enforces policy on tool
 calls before they run, and seals decision journals as evidence. Span shape,

@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/aigentrail/sdk/go/admission"
 	"go.opentelemetry.io/otel/trace"
 )
 
@@ -47,6 +48,8 @@ const enforcerUserAgent = "gentrail-sdk-go"
 
 // Verdict is the backend's decision for a proposed tool call.
 type Verdict struct {
+	Admission       *admission.Link `json:"admission,omitempty"`
+	requestID       string
 	Outcome         string             `json:"outcome,omitempty"`
 	Reference       *DecisionReference `json:"observation_reference,omitempty"`
 	ObservationsURL string             `json:"observations_url,omitempty"`
@@ -68,30 +71,40 @@ type Approval struct {
 // executes. A nil Enforcer allows every call, so the default behaviour stays
 // observe-only.
 type Enforcer struct {
-	base         string
-	apiKey       string
-	client       *http.Client
-	gateTimeout  time.Duration
-	pollInterval time.Duration
+	strictAdmission bool
+	now             func() time.Time
+	base            string
+	apiKey          string
+	client          *http.Client
+	gateTimeout     time.Duration
+	pollInterval    time.Duration
 }
 
-// NewEnforcer builds an Enforcer for the dashboard at endpoint (base URL, no
-// path suffix), authenticating with apiKey. The default gate wait of 120s can
-// be overridden with GENTRAIL_GATE_TIMEOUT_SECONDS.
-func NewEnforcer(endpoint, apiKey string) *Enforcer {
+type EnforcerOption func(*Enforcer)
+
+func WithStrictAdmission() EnforcerOption {
+	return func(e *Enforcer) { e.strictAdmission = true }
+}
+
+func NewEnforcer(endpoint, apiKey string, options ...EnforcerOption) *Enforcer {
 	gateTimeout := defaultGateTimeout
 	if v := os.Getenv("GENTRAIL_GATE_TIMEOUT_SECONDS"); v != "" {
 		if secs, err := strconv.ParseFloat(v, 64); err == nil && secs > 0 {
 			gateTimeout = time.Duration(secs * float64(time.Second))
 		}
 	}
-	return &Enforcer{
+	enforcer := &Enforcer{
+		now:          time.Now,
 		base:         strings.TrimRight(endpoint, "/"),
 		apiKey:       apiKey,
-		client:       &http.Client{Timeout: defaultDecideTimeout},
+		client:       &http.Client{Timeout: defaultDecideTimeout, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }},
 		gateTimeout:  gateTimeout,
 		pollInterval: defaultGatePollInterval,
 	}
+	for _, option := range options {
+		option(enforcer)
+	}
+	return enforcer
 }
 
 // NewEnforcerFromEnv builds an Enforcer from GENTRAIL_DECIDE_ENDPOINT and
@@ -106,12 +119,13 @@ func NewEnforcerFromEnv() *Enforcer {
 }
 
 type decideRequest struct {
-	EventType    string         `json:"event_type"`
-	ToolName     string         `json:"tool_name"`
-	ToolArgs     map[string]any `json:"tool_args"`
-	AgentID      string         `json:"agent_id,omitempty"`
-	InvocationID string         `json:"invocation_id,omitempty"`
-	RequestID    string         `json:"request_id,omitempty"`
+	AdmissionProtocol string         `json:"admission_protocol,omitempty"`
+	EventType         string         `json:"event_type"`
+	ToolName          string         `json:"tool_name"`
+	ToolArgs          map[string]any `json:"tool_args"`
+	AgentID           string         `json:"agent_id,omitempty"`
+	InvocationID      string         `json:"invocation_id,omitempty"`
+	RequestID         string         `json:"request_id,omitempty"`
 }
 
 // DecideOption attaches optional caller identity to a Decide request. A bare
@@ -154,18 +168,22 @@ func synthesizedRequestID() string {
 	return hex.EncodeToString(b[:])
 }
 
-// Decide returns the backend verdict for a proposed tool call. Fails open:
-// any transport or backend error returns ALLOW, because a backend outage must
-// never break the agent, only forgo enforcement for that call.
 func (e *Enforcer) Decide(ctx context.Context, toolName string, toolArgs map[string]any, opts ...DecideOption) Verdict {
 	allow := Verdict{Decision: DecisionAllow, Outcome: "unavailable"}
 	if e == nil {
 		return allow
 	}
+	if e.strictAdmission {
+		allow.Decision = DecisionBlock
+		allow.Message = "Gentrail could not verify this tool-call attempt; the call was not run."
+	}
 	if toolArgs == nil {
 		toolArgs = map[string]any{}
 	}
 	payload := decideRequest{EventType: "tool_call", ToolName: toolName, ToolArgs: toolArgs}
+	if e.strictAdmission {
+		payload.AdmissionProtocol = admission.Protocol
+	}
 	for _, opt := range opts {
 		opt(&payload)
 	}
@@ -177,6 +195,27 @@ func (e *Enforcer) Decide(ctx context.Context, toolName string, toolArgs map[str
 	if payload.InvocationID == "" {
 		payload.InvocationID = ambientTraceID(ctx)
 	}
+	verdict := e.decidePayload(ctx, payload, allow)
+
+	switch verdict.Outcome {
+	case "verified", "request_conflict":
+	default:
+		verdict.Outcome = "unavailable"
+	}
+	switch verdict.Decision {
+	case DecisionAllow, DecisionBlock, DecisionGate:
+	default:
+		verdict.Outcome = "unavailable"
+	}
+	verdict.validateObservationReference(payload)
+	verdict.requestID = payload.RequestID
+	if e.strictAdmission && verdict.Outcome != "verified" {
+		verdict.Decision = DecisionBlock
+	}
+	return verdict
+}
+
+func (e *Enforcer) decidePayload(ctx context.Context, payload decideRequest, allow Verdict) Verdict {
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return allow
@@ -203,27 +242,9 @@ func (e *Enforcer) Decide(ctx context.Context, toolName string, toolArgs map[str
 	if err != nil {
 		return allow
 	}
-	switch verdict.Outcome {
-	case "verified", "request_conflict":
-	default:
-		verdict.Outcome = "unavailable"
-	}
-	switch verdict.Decision {
-	case DecisionAllow, DecisionBlock, DecisionGate:
-	default:
-		verdict.Outcome = "unavailable"
-	}
-	verdict.validateObservationReference(payload)
 	return verdict
 }
 
-// AwaitGate polls a GATE hold's status resource every ~2s until it resolves,
-// returning GateApproved, GateDenied, GateExpired, or GateTimeout. A timeout
-// <= 0 uses the enforcer's default. Unlike Decide this fails closed: an
-// unreachable, unresolved, or missing hold returns a non-approved status,
-// because running a gated action without a confirmed approval is exactly what
-// the gate exists to prevent. The backend hold expires independently
-// (deny-by-default) at its own expires_at.
 func (e *Enforcer) AwaitGate(ctx context.Context, approval *Approval, timeout time.Duration) string {
 	if e == nil || approval == nil || approval.StatusURL == "" {
 		return GateTimeout
@@ -282,11 +303,6 @@ func (e *Enforcer) setAuthHeaders(req *http.Request) {
 	req.Header.Set("User-Agent", enforcerUserAgent)
 }
 
-// Enforce runs one decide-and-gate cycle for a proposed tool call. ALLOW, an
-// unknown decision, and an approved GATE return (true, ""). BLOCK and a
-// denied, expired, or unanswered GATE return (false, message), where message
-// is what the model should see in place of the tool result. GATE waits up to
-// the enforcer's gate timeout. A nil Enforcer allows every call.
 func (e *Enforcer) Enforce(ctx context.Context, toolName string, toolArgs map[string]any, opts ...DecideOption) (allowed bool, message string) {
 	if e == nil {
 		return true, ""
@@ -298,11 +314,11 @@ func (e *Enforcer) Enforce(ctx context.Context, toolName string, toolArgs map[st
 	case DecisionGate:
 		status := e.AwaitGate(ctx, verdict.Approval, e.gateTimeout)
 		if status == GateApproved {
-			return true, ""
+			return e.authorizeAdmission(ctx, verdict)
 		}
 		return false, verdictMessage(verdict) + " (approval " + status + ")"
 	default:
-		return true, ""
+		return e.authorizeAdmission(ctx, verdict)
 	}
 }
 
@@ -322,11 +338,19 @@ func decodeVerdict(raw []byte) (Verdict, error) {
 		Approval        json.RawMessage `json:"approval"`
 		Reference       json.RawMessage `json:"observation_reference"`
 		ObservationsURL json.RawMessage `json:"observations_url"`
+		Admission       json.RawMessage `json:"admission"`
 	}
 	if err := json.Unmarshal(raw, &wire); err != nil {
 		return Verdict{}, err
 	}
 	verdict := Verdict{Decision: wire.Decision, Outcome: verdictText(wire.Outcome), Rule: verdictText(wire.Rule), Message: verdictText(wire.Message), ObservationsURL: verdictText(wire.ObservationsURL)}
+	if len(wire.Admission) != 0 {
+		verdict.Admission = &admission.Link{}
+		if err := json.Unmarshal(wire.Admission, verdict.Admission); err != nil {
+			verdict.Decision = DecisionBlock
+			verdict.Message = "Gentrail returned invalid execution admission; the call was not run."
+		}
+	}
 	var reference DecisionReference
 	if err := json.Unmarshal(wire.Reference, &reference); err == nil {
 		verdict.Reference = &reference
