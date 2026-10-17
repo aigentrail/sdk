@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import {
   ADMISSION_PROTOCOL,
   AdmissionClient,
+  QuotaExhaustedError,
   boundedJson,
   sameOriginLink,
 } from "./admission.js";
@@ -229,6 +230,16 @@ export class PolicyEnforcer {
           verdict.admission,
         );
       } catch (error) {
+        if (error instanceof QuotaExhaustedError) {
+          return {
+            verdict,
+            allowed: false,
+            message:
+              "This agent has used its tool-call allowance for the current quota window.",
+            decision,
+            rule,
+          };
+        }
         console.warn(`gentrail admission failed (${String(error)})`);
         return {
           verdict,

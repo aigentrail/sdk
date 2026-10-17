@@ -128,6 +128,12 @@ test("strict admission matches every shared Go/Python receipt vector", async () 
     try {
       const result = await client(srv.endpoint).enforce("Read", {});
       assert.equal(result.allowed, vector.allowed, vector.name);
+      if (vector.name === "quota exhausted") {
+        assert.equal(
+          result.message,
+          "This agent has used its tool-call allowance for the current quota window.",
+        );
+      }
       assert.equal(srv.calls[0].body.admission_protocol, "quota_v1");
       assert.ok(srv.consumes <= 1);
     } finally {

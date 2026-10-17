@@ -1,12 +1,7 @@
 export const ADMISSION_PROTOCOL = "quota_v1";
 const RESPONSE_SIZE_MAX = 65536;
 
-export interface AdmissionLink {
-  required: true;
-  protocol: typeof ADMISSION_PROTOCOL;
-  proposal_hash: string;
-  reserve_url: string;
-}
+export class QuotaExhaustedError extends Error {}
 
 interface Reservation {
   request_id: string;
@@ -107,6 +102,9 @@ export class AdmissionClient {
       link.proposal_hash,
       signal,
     );
+    if (reserved.outcome === "quota_exhausted") {
+      throw new QuotaExhaustedError("tool-call allowance exhausted");
+    }
     const expected = this.checkedReceipt(reserved, requestId, "reserved");
     if (
       reserved.execution_authorized !== undefined &&
