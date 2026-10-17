@@ -1,0 +1,686 @@
+[
+  {
+    "name": "confirmed",
+    "link": {
+      "required": true,
+      "protocol": "quota_v1",
+      "proposal_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "reserve_url": "/reserve"
+    },
+    "reserved": {
+      "outcome": "verified",
+      "execution_authorized": false,
+      "consume_url": "/consume",
+      "reservation": {
+        "request_id": "call",
+        "state": "reserved",
+        "expires_at": 120,
+        "window_start": 60,
+        "window_end": 180,
+        "revision_id": "revision"
+      }
+    },
+    "consumed": {
+      "outcome": "verified",
+      "execution_authorized": true,
+      "consume_url": "/consume",
+      "reservation": {
+        "request_id": "call",
+        "state": "consumed",
+        "expires_at": 120,
+        "window_start": 60,
+        "window_end": 180,
+        "revision_id": "revision"
+      }
+    },
+    "allowed": true
+  },
+  {
+    "name": "replayed",
+    "link": {
+      "required": true,
+      "protocol": "quota_v1",
+      "proposal_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "reserve_url": "/reserve"
+    },
+    "reserved": {
+      "outcome": "verified",
+      "execution_authorized": false,
+      "consume_url": "/consume",
+      "reservation": {
+        "request_id": "call",
+        "state": "reserved",
+        "expires_at": 120,
+        "window_start": 60,
+        "window_end": 180,
+        "revision_id": "revision"
+      }
+    },
+    "consumed": {
+      "outcome": "verified",
+      "execution_authorized": false,
+      "consume_url": "/consume",
+      "reservation": {
+        "request_id": "call",
+        "state": "consumed",
+        "expires_at": 120,
+        "window_start": 60,
+        "window_end": 180,
+        "revision_id": "revision"
+      }
+    },
+    "allowed": false
+  },
+  {
+    "name": "expired",
+    "link": {
+      "required": true,
+      "protocol": "quota_v1",
+      "proposal_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "reserve_url": "/reserve"
+    },
+    "reserved": {
+      "outcome": "verified",
+      "execution_authorized": false,
+      "consume_url": "/consume",
+      "reservation": {
+        "request_id": "call",
+        "state": "reserved",
+        "expires_at": 120,
+        "window_start": 60,
+        "window_end": 180,
+        "revision_id": "revision"
+      }
+    },
+    "consumed": {
+      "outcome": "verified",
+      "execution_authorized": true,
+      "consume_url": "/consume",
+      "reservation": {
+        "request_id": "call",
+        "state": "consumed",
+        "expires_at": 100,
+        "window_start": 60,
+        "window_end": 180,
+        "revision_id": "revision"
+      }
+    },
+    "allowed": false
+  },
+  {
+    "name": "foreign request",
+    "link": {
+      "required": true,
+      "protocol": "quota_v1",
+      "proposal_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "reserve_url": "/reserve"
+    },
+    "reserved": {
+      "outcome": "verified",
+      "execution_authorized": false,
+      "consume_url": "/consume",
+      "reservation": {
+        "request_id": "call",
+        "state": "reserved",
+        "expires_at": 120,
+        "window_start": 60,
+        "window_end": 180,
+        "revision_id": "revision"
+      }
+    },
+    "consumed": {
+      "outcome": "verified",
+      "execution_authorized": true,
+      "consume_url": "/consume",
+      "reservation": {
+        "request_id": "other",
+        "state": "consumed",
+        "expires_at": 120,
+        "window_start": 60,
+        "window_end": 180,
+        "revision_id": "revision"
+      }
+    },
+    "allowed": false
+  },
+  {
+    "name": "revision changed",
+    "link": {
+      "required": true,
+      "protocol": "quota_v1",
+      "proposal_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "reserve_url": "/reserve"
+    },
+    "reserved": {
+      "outcome": "verified",
+      "execution_authorized": false,
+      "consume_url": "/consume",
+      "reservation": {
+        "request_id": "call",
+        "state": "reserved",
+        "expires_at": 120,
+        "window_start": 60,
+        "window_end": 180,
+        "revision_id": "revision"
+      }
+    },
+    "consumed": {
+      "outcome": "verified",
+      "execution_authorized": true,
+      "consume_url": "/consume",
+      "reservation": {
+        "request_id": "call",
+        "state": "consumed",
+        "expires_at": 120,
+        "window_start": 60,
+        "window_end": 180,
+        "revision_id": "other"
+      }
+    },
+    "allowed": false
+  },
+  {
+    "name": "window changed",
+    "link": {
+      "required": true,
+      "protocol": "quota_v1",
+      "proposal_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "reserve_url": "/reserve"
+    },
+    "reserved": {
+      "outcome": "verified",
+      "execution_authorized": false,
+      "consume_url": "/consume",
+      "reservation": {
+        "request_id": "call",
+        "state": "reserved",
+        "expires_at": 120,
+        "window_start": 60,
+        "window_end": 180,
+        "revision_id": "revision"
+      }
+    },
+    "consumed": {
+      "outcome": "verified",
+      "execution_authorized": true,
+      "consume_url": "/consume",
+      "reservation": {
+        "request_id": "call",
+        "state": "consumed",
+        "expires_at": 120,
+        "window_start": 60,
+        "window_end": 181,
+        "revision_id": "revision"
+      }
+    },
+    "allowed": false
+  },
+  {
+    "name": "unknown outcome",
+    "link": {
+      "required": true,
+      "protocol": "quota_v1",
+      "proposal_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "reserve_url": "/reserve"
+    },
+    "reserved": {
+      "outcome": "verified",
+      "execution_authorized": false,
+      "consume_url": "/consume",
+      "reservation": {
+        "request_id": "call",
+        "state": "reserved",
+        "expires_at": 120,
+        "window_start": 60,
+        "window_end": 180,
+        "revision_id": "revision"
+      }
+    },
+    "consumed": {
+      "outcome": "unknown",
+      "execution_authorized": true,
+      "consume_url": "/consume",
+      "reservation": {
+        "request_id": "call",
+        "state": "consumed",
+        "expires_at": 120,
+        "window_start": 60,
+        "window_end": 180,
+        "revision_id": "revision"
+      }
+    },
+    "allowed": false
+  },
+  {
+    "name": "not consumed",
+    "link": {
+      "required": true,
+      "protocol": "quota_v1",
+      "proposal_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "reserve_url": "/reserve"
+    },
+    "reserved": {
+      "outcome": "verified",
+      "execution_authorized": false,
+      "consume_url": "/consume",
+      "reservation": {
+        "request_id": "call",
+        "state": "reserved",
+        "expires_at": 120,
+        "window_start": 60,
+        "window_end": 180,
+        "revision_id": "revision"
+      }
+    },
+    "consumed": {
+      "outcome": "verified",
+      "execution_authorized": true,
+      "consume_url": "/consume",
+      "reservation": {
+        "request_id": "call",
+        "state": "reserved",
+        "expires_at": 120,
+        "window_start": 60,
+        "window_end": 180,
+        "revision_id": "revision"
+      }
+    },
+    "allowed": false
+  },
+  {
+    "name": "missing revision",
+    "link": {
+      "required": true,
+      "protocol": "quota_v1",
+      "proposal_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "reserve_url": "/reserve"
+    },
+    "reserved": {
+      "outcome": "verified",
+      "execution_authorized": false,
+      "consume_url": "/consume",
+      "reservation": {
+        "request_id": "call",
+        "state": "reserved",
+        "expires_at": 120,
+        "window_start": 60,
+        "window_end": 180,
+        "revision_id": "revision"
+      }
+    },
+    "consumed": {
+      "outcome": "verified",
+      "execution_authorized": true,
+      "consume_url": "/consume",
+      "reservation": {
+        "request_id": "call",
+        "state": "consumed",
+        "expires_at": 120,
+        "window_start": 60,
+        "window_end": 180,
+        "revision_id": ""
+      }
+    },
+    "allowed": false
+  },
+  {
+    "name": "future window",
+    "link": {
+      "required": true,
+      "protocol": "quota_v1",
+      "proposal_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "reserve_url": "/reserve"
+    },
+    "reserved": {
+      "outcome": "verified",
+      "execution_authorized": false,
+      "consume_url": "/consume",
+      "reservation": {
+        "request_id": "call",
+        "state": "reserved",
+        "expires_at": 120,
+        "window_start": 60,
+        "window_end": 180,
+        "revision_id": "revision"
+      }
+    },
+    "consumed": {
+      "outcome": "verified",
+      "execution_authorized": true,
+      "consume_url": "/consume",
+      "reservation": {
+        "request_id": "call",
+        "state": "consumed",
+        "expires_at": 120,
+        "window_start": 101,
+        "window_end": 180,
+        "revision_id": "revision"
+      }
+    },
+    "allowed": false
+  },
+  {
+    "name": "expiry past window",
+    "link": {
+      "required": true,
+      "protocol": "quota_v1",
+      "proposal_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "reserve_url": "/reserve"
+    },
+    "reserved": {
+      "outcome": "verified",
+      "execution_authorized": false,
+      "consume_url": "/consume",
+      "reservation": {
+        "request_id": "call",
+        "state": "reserved",
+        "expires_at": 120,
+        "window_start": 60,
+        "window_end": 180,
+        "revision_id": "revision"
+      }
+    },
+    "consumed": {
+      "outcome": "verified",
+      "execution_authorized": true,
+      "consume_url": "/consume",
+      "reservation": {
+        "request_id": "call",
+        "state": "consumed",
+        "expires_at": 181,
+        "window_start": 60,
+        "window_end": 180,
+        "revision_id": "revision"
+      }
+    },
+    "allowed": false
+  },
+  {
+    "name": "premature authority",
+    "link": {
+      "required": true,
+      "protocol": "quota_v1",
+      "proposal_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "reserve_url": "/reserve"
+    },
+    "reserved": {
+      "outcome": "verified",
+      "execution_authorized": true,
+      "consume_url": "/consume",
+      "reservation": {
+        "request_id": "call",
+        "state": "reserved",
+        "expires_at": 120,
+        "window_start": 60,
+        "window_end": 180,
+        "revision_id": "revision"
+      }
+    },
+    "consumed": {
+      "outcome": "verified",
+      "execution_authorized": true,
+      "consume_url": "/consume",
+      "reservation": {
+        "request_id": "call",
+        "state": "consumed",
+        "expires_at": 120,
+        "window_start": 60,
+        "window_end": 180,
+        "revision_id": "revision"
+      }
+    },
+    "allowed": false
+  },
+  {
+    "name": "reservation expired",
+    "link": {
+      "required": true,
+      "protocol": "quota_v1",
+      "proposal_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "reserve_url": "/reserve"
+    },
+    "reserved": {
+      "outcome": "verified",
+      "execution_authorized": false,
+      "consume_url": "/consume",
+      "reservation": {
+        "request_id": "call",
+        "state": "reserved",
+        "expires_at": 100,
+        "window_start": 60,
+        "window_end": 180,
+        "revision_id": "revision"
+      }
+    },
+    "consumed": {
+      "outcome": "verified",
+      "execution_authorized": true,
+      "consume_url": "/consume",
+      "reservation": {
+        "request_id": "call",
+        "state": "consumed",
+        "expires_at": 120,
+        "window_start": 60,
+        "window_end": 180,
+        "revision_id": "revision"
+      }
+    },
+    "allowed": false
+  },
+  {
+    "name": "quota exhausted",
+    "link": {
+      "required": true,
+      "protocol": "quota_v1",
+      "proposal_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "reserve_url": "/reserve"
+    },
+    "reserved": {
+      "outcome": "quota_exhausted",
+      "execution_authorized": false,
+      "consume_url": "/consume",
+      "reservation": {
+        "request_id": "call",
+        "state": "reserved",
+        "expires_at": 120,
+        "window_start": 60,
+        "window_end": 180,
+        "revision_id": "revision"
+      }
+    },
+    "consumed": {
+      "outcome": "verified",
+      "execution_authorized": true,
+      "consume_url": "/consume",
+      "reservation": {
+        "request_id": "call",
+        "state": "consumed",
+        "expires_at": 120,
+        "window_start": 60,
+        "window_end": 180,
+        "revision_id": "revision"
+      }
+    },
+    "allowed": false
+  },
+  {
+    "name": "foreign consume link",
+    "link": {
+      "required": true,
+      "protocol": "quota_v1",
+      "proposal_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "reserve_url": "/reserve"
+    },
+    "reserved": {
+      "outcome": "verified",
+      "execution_authorized": false,
+      "consume_url": "https://foreign.invalid/consume",
+      "reservation": {
+        "request_id": "call",
+        "state": "reserved",
+        "expires_at": 120,
+        "window_start": 60,
+        "window_end": 180,
+        "revision_id": "revision"
+      }
+    },
+    "consumed": {
+      "outcome": "verified",
+      "execution_authorized": true,
+      "consume_url": "/consume",
+      "reservation": {
+        "request_id": "call",
+        "state": "consumed",
+        "expires_at": 120,
+        "window_start": 60,
+        "window_end": 180,
+        "revision_id": "revision"
+      }
+    },
+    "allowed": false
+  },
+  {
+    "name": "unsupported protocol",
+    "link": {
+      "required": true,
+      "protocol": "quota_v2",
+      "proposal_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "reserve_url": "/reserve"
+    },
+    "reserved": {
+      "outcome": "verified",
+      "execution_authorized": false,
+      "consume_url": "/consume",
+      "reservation": {
+        "request_id": "call",
+        "state": "reserved",
+        "expires_at": 120,
+        "window_start": 60,
+        "window_end": 180,
+        "revision_id": "revision"
+      }
+    },
+    "consumed": {
+      "outcome": "verified",
+      "execution_authorized": true,
+      "consume_url": "/consume",
+      "reservation": {
+        "request_id": "call",
+        "state": "consumed",
+        "expires_at": 120,
+        "window_start": 60,
+        "window_end": 180,
+        "revision_id": "revision"
+      }
+    },
+    "allowed": false
+  },
+  {
+    "name": "not required",
+    "link": {
+      "required": false,
+      "protocol": "quota_v1",
+      "proposal_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "reserve_url": "/reserve"
+    },
+    "reserved": {
+      "outcome": "verified",
+      "execution_authorized": false,
+      "consume_url": "/consume",
+      "reservation": {
+        "request_id": "call",
+        "state": "reserved",
+        "expires_at": 120,
+        "window_start": 60,
+        "window_end": 180,
+        "revision_id": "revision"
+      }
+    },
+    "consumed": {
+      "outcome": "verified",
+      "execution_authorized": true,
+      "consume_url": "/consume",
+      "reservation": {
+        "request_id": "call",
+        "state": "consumed",
+        "expires_at": 120,
+        "window_start": 60,
+        "window_end": 180,
+        "revision_id": "revision"
+      }
+    },
+    "allowed": false
+  },
+  {
+    "name": "malformed digest",
+    "link": {
+      "required": true,
+      "protocol": "quota_v1",
+      "proposal_hash": "not-a-hash",
+      "reserve_url": "/reserve"
+    },
+    "reserved": {
+      "outcome": "verified",
+      "execution_authorized": false,
+      "consume_url": "/consume",
+      "reservation": {
+        "request_id": "call",
+        "state": "reserved",
+        "expires_at": 120,
+        "window_start": 60,
+        "window_end": 180,
+        "revision_id": "revision"
+      }
+    },
+    "consumed": {
+      "outcome": "verified",
+      "execution_authorized": true,
+      "consume_url": "/consume",
+      "reservation": {
+        "request_id": "call",
+        "state": "consumed",
+        "expires_at": 120,
+        "window_start": 60,
+        "window_end": 180,
+        "revision_id": "revision"
+      }
+    },
+    "allowed": false
+  },
+  {
+    "name": "foreign reserve link",
+    "link": {
+      "required": true,
+      "protocol": "quota_v1",
+      "proposal_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "reserve_url": "https://foreign.invalid/reserve"
+    },
+    "reserved": {
+      "outcome": "verified",
+      "execution_authorized": false,
+      "consume_url": "/consume",
+      "reservation": {
+        "request_id": "call",
+        "state": "reserved",
+        "expires_at": 120,
+        "window_start": 60,
+        "window_end": 180,
+        "revision_id": "revision"
+      }
+    },
+    "consumed": {
+      "outcome": "verified",
+      "execution_authorized": true,
+      "consume_url": "/consume",
+      "reservation": {
+        "request_id": "call",
+        "state": "consumed",
+        "expires_at": 120,
+        "window_start": 60,
+        "window_end": 180,
+        "revision_id": "revision"
+      }
+    },
+    "allowed": false
+  }
+]

@@ -97,7 +97,9 @@ async def _awrap_tool_call(
     return await handler(request)
 
 
-def enforcement_middleware(enforcer: Any = None, *, agent_id: str = "") -> "AgentMiddleware":
+def enforcement_middleware(
+    enforcer: Any = None, *, agent_id: str = ""
+) -> "AgentMiddleware":
     """An AgentMiddleware enforcing Gentrail policy on every tool call.
     enforcer is a PolicyEnforcer or AsyncPolicyEnforcer; None builds one from
     the environment and raises when enforcement is not configured, since
@@ -110,12 +112,13 @@ def enforcement_middleware(enforcer: Any = None, *, agent_id: str = "") -> "Agen
 
     from langchain.agents.middleware import AgentMiddleware
     from langchain.messages import ToolMessage
+
     if isinstance(enforcer, AsyncPolicyEnforcer):
-        sync = PolicyEnforcer(enforcer.base, enforcer.api_key, enforcer.timeout)
+        sync = enforcer._sync
         async_twin = enforcer
     elif isinstance(enforcer, PolicyEnforcer):
         sync = enforcer
-        async_twin = AsyncPolicyEnforcer(enforcer.base, enforcer.api_key, enforcer.timeout)
+        async_twin = AsyncPolicyEnforcer.from_sync(enforcer)
     else:
         sync = enforcer
         async_twin = enforcer
@@ -132,7 +135,11 @@ def enforcement_middleware(enforcer: Any = None, *, agent_id: str = "") -> "Agen
         def wrap_tool_call(self, request: Any, handler: Callable[[Any], Any]) -> Any:
             return _wrap_tool_call(request, handler, sync, agent_id, cancel)
 
-        async def awrap_tool_call(self, request: Any, handler: Callable[[Any], Any]) -> Any:
-            return await _awrap_tool_call(request, handler, async_twin, agent_id, cancel)
+        async def awrap_tool_call(
+            self, request: Any, handler: Callable[[Any], Any]
+        ) -> Any:
+            return await _awrap_tool_call(
+                request, handler, async_twin, agent_id, cancel
+            )
 
     return GentrailEnforcementMiddleware()

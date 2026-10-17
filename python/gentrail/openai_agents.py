@@ -69,7 +69,7 @@ def _as_async(enforcer: Any) -> Any:
     """Any other object is trusted to already speak the async decide/await_gate
     surface, which is what lets tests drive the guardrail with a fake."""
     if isinstance(enforcer, PolicyEnforcer):
-        return AsyncPolicyEnforcer(enforcer.base, enforcer.api_key, enforcer.timeout)
+        return AsyncPolicyEnforcer.from_sync(enforcer)
     return enforcer
 
 

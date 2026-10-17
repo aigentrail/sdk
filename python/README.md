@@ -7,6 +7,45 @@ executes.
 A Go SDK with the same span shape lives in [`../go/`](../go/) (`go get
 github.com/aigentrail/sdk/go`).
 
+## Strict tool-call quotas
+
+Use an agent-bound API key and opt into fail-closed enforcement:
+
+```python
+from gentrail.enforcement import PolicyEnforcer, enforce
+
+enforcer = PolicyEnforcer(endpoint, bound_agent_key, strict_admission=True)
+allowed, message = enforce(
+    enforcer, "issue_refund", arguments,
+    agent_id="billing-agent", request_id=tool_call_id,
+)
+if not allowed:
+    raise RuntimeError(message)
+result = issue_refund(**arguments)
+```
+
+`AsyncPolicyEnforcer(..., strict_admission=True)` with `enforce_async` has the
+same behavior. `PolicyEnforcer.from_env(strict_admission=True)` reads the
+existing endpoint and key variables. Pass this enforcer to
+`GentrailGovernanceHook(enforcer=...)`, `enforcement_middleware(enforcer=...)`,
+or `enforcement_guardrail(enforcer=...)`; adapter sync/async conversion retains
+its strict setting, deadlines, clock and identity generator.
+
+Enforcement resolves approval first, then reserves and consumes once immediately
+before returning permission to run. Unknown outcomes, outages, malformed or
+expired receipts, foreign links, redirects and lost consume responses block the
+call. A repeated request ID cannot reuse a consumed grant. Consumption remains
+charged after a tool failure, host refusal or crash. Execution and reporting
+remain separate; never retry execution because result reporting failed.
+
+Low-level `decide` and `await_gate` are policy reads and do not grant quota
+execution authority. Use `enforce` or a framework adapter at the tool boundary.
+The admission exchange uses the existing `quota_v1` server controls, a shared
+nine-second budget, at most three seconds per network operation and 64 KiB
+receipt limits. It never retries consume. No quota means no reservation requests.
+Constructors without strict opt-in retain their existing fail-open decision
+behavior, while an admission resource always requires explicit strict support.
+
 ## Quickstart
 
 ```bash

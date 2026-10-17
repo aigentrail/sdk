@@ -11,8 +11,8 @@ OpenTelemetry span shape, so one ingest path accepts traces from any runtime.
 
 ## Feature parity
 
-Every SDK ships the same core features. Framework adapters are native to each
-ecosystem.
+Core behavior is tested against shared conformance specs. Framework adapters
+are native to each ecosystem; the table records current implementation support.
 
 | Feature | Python | Go | TypeScript |
 | --- | --- | --- | --- |
@@ -23,6 +23,7 @@ ecosystem.
 | Redaction of GenAI attributes on spans other libraries emit | `instrument()` | `Instrument()` | `instrument()` |
 | Inline enforcement: decide (fails open) and gate wait (fails closed) | `PolicyEnforcer` | `Enforcer` | `PolicyEnforcer` |
 | One decide-and-gate cycle | `enforce()` | `Enforcer.Enforce` | `PolicyEnforcer.enforce` |
+| Strict tool-call quota admission, explicit opt-in | `strict_admission=True` (sync and async) | `WithStrictAdmission()` | pending |
 | Evidence ledger with sealed, hash-verified decision journals | `EvidenceLedger` | `EvidenceLedger` | `EvidenceLedger` |
 | HTTP model-call instrumentation | `tracer.httpx_transport()` | `Tracer.HTTPRoundTripper` | `tracer.fetch()` |
 | Framework adapters | Strands, LangChain, OpenAI Agents | none | Vercel AI SDK (`guardTools`) |
@@ -30,7 +31,9 @@ ecosystem.
 Parity is enforced by shared specs in [`spec/`](spec/) that every SDK's tests
 read: the PII redaction corpus, decision-journal hash vectors (SHA-256 over RFC
 8785 canonical JSON), enforcement outcomes, and the required span names and
-attributes. The PII detector's rule data is vendored byte-identically into each
+attributes. Go and Python also run the same strict-admission receipt vectors
+(`spec/admission_vectors.json`); TypeScript adoption is the remaining quota gap.
+The PII detector's rule data is vendored byte-identically into each
 SDK by `scripts/sync-pii-data.sh`, and CI checks the copies match.
 
 Two guarantees hold in every SDK:

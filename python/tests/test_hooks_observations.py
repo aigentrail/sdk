@@ -147,7 +147,23 @@ def test_pending_receipts_are_bounded_and_missing_receipts_remain_unlinked():
     assert tracer.calls[1]["decision_reference"] is None
 
 
+def test_strict_quota_strands_hook_consumes_and_cancels_replay():
+    from test_admission import VECTORS, server, enforcer
+
+    with server(VECTORS[0]) as (endpoint, calls, consumes):
+        hook = hooks.GentrailGovernanceHook(enforcer=enforcer(endpoint))
+        first = event("call")
+        hook.capture_tool_call_start(first)
+        assert not first.cancel_tool
+        replay = event("call")
+        hook.capture_tool_call_start(replay)
+        assert replay.cancel_tool
+        assert isinstance(hook._pending_tool_calls["call"], hooks.CancelledToolCall)
+        assert len(consumes) == 2
+
+
 if __name__ == "__main__":
+    test_strict_quota_strands_hook_consumes_and_cancels_replay()
     test_results_keep_each_call_reference_and_full_arguments()
     test_cancelled_calls_never_emit_execution_observations()
     test_pending_receipts_are_bounded_and_missing_receipts_remain_unlinked()
