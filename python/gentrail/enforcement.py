@@ -18,7 +18,15 @@ import os
 import time
 import urllib.request
 import uuid
-from typing import Any
+from typing import Any, Callable
+
+from .admission import (
+    AdmissionClient,
+    NoRedirect,
+    PROTOCOL,
+    QuotaExhaustedError,
+    same_origin_link,
+)
 
 from .observation_reference import DECISION_OUTCOMES, checked_reference
 
@@ -35,11 +43,27 @@ _USER_AGENT = "gentrail-sdk-python"
 class PolicyEnforcer:
     """Synchronous client for the backend's /api/v1/decide endpoint."""
 
-    def __init__(self, endpoint: str, api_key: str, timeout: float = 3.0):
+    def __init__(
+        self,
+        endpoint: str,
+        api_key: str,
+        timeout: float = 3.0,
+        *,
+        strict_admission: bool = False,
+        clock: Callable[[], float] = time.time,
+        monotonic: Callable[[], float] = time.monotonic,
+        id_gen: Callable[[], str] = lambda: uuid.uuid4().hex,
+    ) -> None:
         self.base = endpoint.rstrip("/")
         self.url = self.base + "/api/v1/decide"
         self.api_key = api_key
         self.timeout = timeout
+        self.strict_admission = strict_admission
+        self._id_gen = id_gen
+        self._opener = urllib.request.build_opener(NoRedirect())
+        self._admission = AdmissionClient(
+            self.url, api_key, timeout, clock=clock, monotonic=monotonic
+        )
         # A GATE hold blocks the tool while a human decides. Bound the wait so an
         # unanswered gate never hangs the agent forever; on timeout the gate
         # fails closed (the tool stays cancelled). The backend hold expires
@@ -49,12 +73,16 @@ class PolicyEnforcer:
         )
 
     @classmethod
-    def from_env(cls) -> "PolicyEnforcer | None":
+    def from_env(cls, *, strict_admission: bool = False) -> "PolicyEnforcer | None":
         endpoint = os.environ.get("GENTRAIL_DECIDE_ENDPOINT", "").strip()
         api_key = os.environ.get("GENTRAIL_API_KEY", "").strip()
         if not endpoint or not api_key:
+            if strict_admission:
+                raise ValueError(
+                    "Strict admission needs a decide endpoint and agent-bound API key"
+                )
             return None
-        return cls(endpoint, api_key)
+        return cls(endpoint, api_key, strict_admission=strict_admission)
 
     def decide(
         self,
@@ -78,43 +106,75 @@ class PolicyEnforcer:
         agent_id or invocation_id, since it could not be joined to its trace
         and would double-count against the evaluator's own row.
 
-        Fails open - a backend error must never break the agent, only forgo
-        enforcement for that call.
+        Decision errors fail open by default. Strict admission fails closed;
+        callers must use enforce to obtain quota execution authority.
         """
         payload = {
             "event_type": "tool_call",
             "tool_name": tool_name,
             "tool_args": tool_args,
-            "request_id": request_id or uuid.uuid4().hex,
+            "request_id": request_id or self._id_gen(),
         }
+        if self.strict_admission:
+            payload["admission_protocol"] = PROTOCOL
         if agent_id:
             payload["agent_id"] = agent_id
         invocation_id = invocation_id or ambient_otel_trace_id()
         if invocation_id:
             payload["invocation_id"] = invocation_id
-        body = json.dumps(payload).encode()
-        req = urllib.request.Request(
-            self.url,
-            data=body,
-            method="POST",
-            headers={
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {self.api_key}",
-                "User-Agent": _USER_AGENT,
-            },
-        )
         try:
-            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+            body = json.dumps(payload).encode()
+            req = urllib.request.Request(
+                self.url,
+                data=body,
+                method="POST",
+                headers={
+                    "Content-Type": "application/json",
+                    "Authorization": f"Bearer {self.api_key}",
+                    "User-Agent": _USER_AGENT,
+                },
+            )
+            with self._opener.open(req, timeout=self.timeout) as resp:
                 response = resp.read(2 * 1024 * 1024 + 1)
                 if len(response) > 2 * 1024 * 1024:
                     raise ValueError("decide response exceeds size limit")
                 verdict = json.loads(response.decode())
-                return _checked_verdict(verdict, payload)
+                verdict = _checked_verdict(verdict, payload)
+                verdict["_request_id"] = payload["request_id"]
+                if self.strict_admission and verdict["outcome"] != "verified":
+                    verdict["decision"] = "BLOCK"
+                return verdict
         except Exception as e:
-            logger.warning(
-                "enforcement decide failed (%s); allowing tool %s", e, tool_name
+            logger.warning("enforcement decide failed (%s) for tool %s", e, tool_name)
+            return {
+                "decision": "BLOCK" if self.strict_admission else "ALLOW",
+                "outcome": "unavailable",
+            }
+
+    def authorize_admission(self, verdict: dict) -> tuple[bool, str]:
+        if "admission" not in verdict:
+            return True, ""
+        if not self.strict_admission:
+            return (
+                False,
+                "Strict tool-call quotas require strict_admission and an agent-bound credential.",
             )
-            return {"decision": "ALLOW", "outcome": "unavailable"}
+        try:
+            self._admission.authorize(
+                verdict.get("_request_id", ""), verdict["admission"]
+            )
+        except QuotaExhaustedError:
+            return (
+                False,
+                "This agent has used its tool-call allowance for the current quota window.",
+            )
+        except Exception as error:
+            logger.warning("tool-call admission failed (%s)", error)
+            return (
+                False,
+                "Gentrail could not authorize this tool-call attempt; the call was not run.",
+            )
+        return True, ""
 
     def await_gate(self, approval: dict, *, timeout: float | None = None) -> str:
         """Poll a GATE hold's status resource until it resolves, returning the
@@ -128,7 +188,10 @@ class PolicyEnforcer:
         status_url = (approval or {}).get("status_url")
         if not status_url:
             return "timeout"
-        poll_url = self.base + status_url
+        try:
+            poll_url = same_origin_link(self.url, status_url)
+        except ValueError:
+            return "timeout"
         deadline = time.monotonic() + (
             self.gate_timeout if timeout is None else timeout
         )
@@ -153,7 +216,7 @@ class PolicyEnforcer:
                 "User-Agent": _USER_AGENT,
             },
         )
-        with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+        with self._opener.open(req, timeout=self.timeout) as resp:
             return json.loads(resp.read().decode()).get("status", "pending")
 
 
@@ -163,19 +226,31 @@ class AsyncPolicyEnforcer:
     Each HTTP round trip is the sync urllib call moved off the event loop with
     asyncio.to_thread, so the base install still needs no HTTP client
     dependency, while GATE polling waits with asyncio.sleep instead of
-    parking a thread. Semantics match the sync client exactly: decide fails
-    open, await_gate fails closed, same environment configuration.
+    parking a thread. Strict admission and approval behavior match the sync client.
     """
 
-    def __init__(self, endpoint: str, api_key: str, timeout: float = 3.0):
-        self._sync = PolicyEnforcer(endpoint, api_key, timeout)
+    def __init__(
+        self, endpoint: str, api_key: str, timeout: float = 3.0, **options: Any
+    ) -> None:
+        self._sync = PolicyEnforcer(endpoint, api_key, timeout, **options)
 
     @classmethod
-    def from_env(cls) -> "AsyncPolicyEnforcer | None":
-        sync = PolicyEnforcer.from_env()
+    def from_sync(cls, enforcer: PolicyEnforcer) -> "AsyncPolicyEnforcer":
+        instance = cls.__new__(cls)
+        instance._sync = enforcer
+        return instance
+
+    async def authorize_admission(self, verdict: dict) -> tuple[bool, str]:
+        return await asyncio.to_thread(self._sync.authorize_admission, verdict)
+
+    @classmethod
+    def from_env(
+        cls, *, strict_admission: bool = False
+    ) -> "AsyncPolicyEnforcer | None":
+        sync = PolicyEnforcer.from_env(strict_admission=strict_admission)
         if sync is None:
             return None
-        return cls(sync.base, sync.api_key, sync.timeout)
+        return cls.from_sync(sync)
 
     @property
     def base(self) -> str:
@@ -215,7 +290,10 @@ class AsyncPolicyEnforcer:
         status_url = (approval or {}).get("status_url")
         if not status_url:
             return "timeout"
-        poll_url = self._sync.base + status_url
+        try:
+            poll_url = same_origin_link(self._sync.url, status_url)
+        except ValueError:
+            return "timeout"
         deadline = time.monotonic() + (
             self._sync.gate_timeout if timeout is None else timeout
         )
@@ -262,14 +340,19 @@ def enforce(
         invocation_id=invocation_id,
         request_id=request_id,
     )
+    return finish_enforcement(enforcer, verdict)
+
+
+def finish_enforcement(enforcer, verdict: dict) -> tuple[bool, str]:
     decision = verdict.get("decision")
     if decision == "BLOCK":
         return False, _verdict_message(verdict)
     if decision == "GATE":
         status = enforcer.await_gate(verdict.get("approval") or {})
-        if status == "approved":
-            return True, ""
-        return False, f"{_verdict_message(verdict)} (approval {status})"
+        if status != "approved":
+            return False, f"{_verdict_message(verdict)} (approval {status})"
+    if "admission" in verdict:
+        return enforcer.authorize_admission(verdict)
     return True, ""
 
 
@@ -295,9 +378,10 @@ async def enforce_async(
         return False, _verdict_message(verdict)
     if decision == "GATE":
         status = await enforcer.await_gate(verdict.get("approval") or {})
-        if status == "approved":
-            return True, ""
-        return False, f"{_verdict_message(verdict)} (approval {status})"
+        if status != "approved":
+            return False, f"{_verdict_message(verdict)} (approval {status})"
+    if "admission" in verdict:
+        return await enforcer.authorize_admission(verdict)
     return True, ""
 
 

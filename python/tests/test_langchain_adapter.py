@@ -96,7 +96,9 @@ def _serve(verdict, gate_statuses=()):
 
 def _middleware_for(verdict, gate_statuses=(), agent_id="reporter"):
     srv, captured = _serve(verdict, gate_statuses)
-    enf = enforcement.PolicyEnforcer(f"http://127.0.0.1:{srv.server_address[1]}", "sk-test")
+    enf = enforcement.PolicyEnforcer(
+        f"http://127.0.0.1:{srv.server_address[1]}", "sk-test"
+    )
     return adapter.enforcement_middleware(enf, agent_id=agent_id), captured, srv
 
 
@@ -124,7 +126,11 @@ def test_allow_calls_handler_and_sends_identity():
 
 def test_block_short_circuits_with_error_tool_message():
     mw, _, srv = _middleware_for(
-        {"decision": "BLOCK", "rule": "destructive_sql_pre", "message": "BLOCKED: destructive SQL."}
+        {
+            "decision": "BLOCK",
+            "rule": "destructive_sql_pre",
+            "message": "BLOCKED: destructive SQL.",
+        }
     )
     ran = []
     result = mw.wrap_tool_call(_request(), lambda request: ran.append(request))
@@ -144,7 +150,11 @@ def test_gate_approved_runs_tool_async():
         return "TOOL_RAN"
 
     mw, _, srv = _middleware_for(
-        {"decision": "GATE", "message": "Hold on", "approval": {"status_url": "/api/v1/approvals/x"}},
+        {
+            "decision": "GATE",
+            "message": "Hold on",
+            "approval": {"status_url": "/api/v1/approvals/x"},
+        },
         gate_statuses=["pending", "approved"],
     )
     result = asyncio.run(mw.awrap_tool_call(_request(), handler))
@@ -170,7 +180,11 @@ def test_gate_timeout_cancels_async():
     os.environ["GENTRAIL_GATE_TIMEOUT_SECONDS"] = "0.05"
     try:
         mw, _, srv = _middleware_for(
-            {"decision": "GATE", "message": "Hold on", "approval": {"status_url": "/x"}},
+            {
+                "decision": "GATE",
+                "message": "Hold on",
+                "approval": {"status_url": "/x"},
+            },
             gate_statuses=["pending"],
         )
     finally:
@@ -190,7 +204,10 @@ def test_gate_timeout_cancels_async():
 
 
 def test_unconfigured_environment_raises():
-    saved = {k: os.environ.pop(k, None) for k in ("GENTRAIL_DECIDE_ENDPOINT", "GENTRAIL_API_KEY")}
+    saved = {
+        k: os.environ.pop(k, None)
+        for k in ("GENTRAIL_DECIDE_ENDPOINT", "GENTRAIL_API_KEY")
+    }
     try:
         adapter.enforcement_middleware()
     except RuntimeError as e:
@@ -203,7 +220,41 @@ def test_unconfigured_environment_raises():
                 os.environ[k] = val
 
 
+def test_strict_quota_configuration_survives_both_adapter_directions():
+    from test_admission import VECTORS, server, enforcer
+
+    for asynchronous in (False, True):
+        with server(VECTORS[0]) as (endpoint, calls, consumes):
+            sync = enforcer(endpoint)
+            sync.gate_timeout = 0.25
+            active = (
+                enforcement.AsyncPolicyEnforcer.from_sync(sync)
+                if asynchronous
+                else sync
+            )
+            middleware = adapter.enforcement_middleware(active)
+            request = _request()
+            request.tool_call["id"] = "call"
+            assert (
+                middleware.wrap_tool_call(request, lambda request: "TOOL_RAN")
+                == "TOOL_RAN"
+            )
+
+            async def handler(request):
+                raise AssertionError("replayed grant ran tool")
+
+            result = asyncio.run(middleware.awrap_tool_call(request, handler))
+            assert isinstance(result, FakeToolMessage)
+            assert len(consumes) == 2
+            assert all(
+                body["admission_protocol"] == "quota_v1"
+                for path, body in calls
+                if path == "/api/v1/decide"
+            )
+
+
 if __name__ == "__main__":
+    test_strict_quota_configuration_survives_both_adapter_directions()
     test_allow_calls_handler_and_sends_identity()
     test_block_short_circuits_with_error_tool_message()
     test_gate_approved_runs_tool_async()

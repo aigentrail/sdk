@@ -99,7 +99,9 @@ def _serve(verdict, gate_statuses=()):
 
 def _guardrail_for(verdict, gate_statuses=()):
     srv, captured = _serve(verdict, gate_statuses)
-    enf = enforcement.PolicyEnforcer(f"http://127.0.0.1:{srv.server_address[1]}", "sk-test")
+    enf = enforcement.PolicyEnforcer(
+        f"http://127.0.0.1:{srv.server_address[1]}", "sk-test"
+    )
     return adapter.enforcement_guardrail(enf), captured, srv
 
 
@@ -126,7 +128,9 @@ def test_call_facts_extracts_identity():
 
 def test_call_facts_wraps_unparseable_arguments():
     data = SimpleNamespace(
-        context=SimpleNamespace(tool_name="t", tool_call_id="c", tool_arguments="not json"),
+        context=SimpleNamespace(
+            tool_name="t", tool_call_id="c", tool_arguments="not json"
+        ),
         agent=None,
     )
     _, args, _, agent = adapter._call_facts(data)
@@ -148,7 +152,11 @@ def test_allow_passes_through_and_sends_identity():
 
 def test_block_rejects_with_rule_message():
     guardrail, _, srv = _guardrail_for(
-        {"decision": "BLOCK", "rule": "destructive_sql_pre", "message": "BLOCKED: destructive SQL."}
+        {
+            "decision": "BLOCK",
+            "rule": "destructive_sql_pre",
+            "message": "BLOCKED: destructive SQL.",
+        }
     )
     out = _run(guardrail, _data())
     srv.shutdown()
@@ -159,7 +167,11 @@ def test_block_rejects_with_rule_message():
 def test_gate_approved_proceeds():
     enforcement.GATE_POLL_INTERVAL_SECONDS = 0.01
     guardrail, _, srv = _guardrail_for(
-        {"decision": "GATE", "message": "Hold on", "approval": {"status_url": "/api/v1/approvals/x"}},
+        {
+            "decision": "GATE",
+            "message": "Hold on",
+            "approval": {"status_url": "/api/v1/approvals/x"},
+        },
         gate_statuses=["pending", "approved"],
     )
     out = _run(guardrail, _data())
@@ -179,7 +191,10 @@ def test_gate_denied_rejects():
 
 
 def test_unconfigured_environment_raises():
-    saved = {k: os.environ.pop(k, None) for k in ("GENTRAIL_DECIDE_ENDPOINT", "GENTRAIL_API_KEY")}
+    saved = {
+        k: os.environ.pop(k, None)
+        for k in ("GENTRAIL_DECIDE_ENDPOINT", "GENTRAIL_API_KEY")
+    }
     try:
         adapter.enforcement_guardrail()
     except RuntimeError as e:
@@ -192,7 +207,22 @@ def test_unconfigured_environment_raises():
                 os.environ[k] = val
 
 
+def test_strict_quota_guardrail_consumes_and_refuses_replay():
+    from test_admission import VECTORS, server, enforcer
+
+    with server(VECTORS[0]) as (endpoint, calls, consumes):
+        active = enforcer(endpoint)
+        assert adapter._as_async(active)._sync is active
+        guardrail = adapter.enforcement_guardrail(active)
+        data = _data()
+        data.context.tool_call_id = "call"
+        assert _run(guardrail, data).behavior == "allow"
+        assert _run(guardrail, data).behavior == "reject_content"
+        assert len(consumes) == 2
+
+
 if __name__ == "__main__":
+    test_strict_quota_guardrail_consumes_and_refuses_replay()
     test_call_facts_extracts_identity()
     test_call_facts_wraps_unparseable_arguments()
     test_allow_passes_through_and_sends_identity()

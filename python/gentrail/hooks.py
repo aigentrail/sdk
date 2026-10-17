@@ -33,7 +33,7 @@ from .evidence_ledger import (
     ToolCallRecord,
     evidence_ledger,
 )
-from .enforcement import PolicyEnforcer
+from .enforcement import PolicyEnforcer, finish_enforcement
 from .otel_exporter import GovernanceTracer
 from .observation_reference import DecisionReference
 
@@ -229,25 +229,15 @@ class GentrailGovernanceHook(HookProvider):
             )
             decision = verdict.get("decision")
             rule = verdict.get("rule", "")
-            msg = verdict.get("message") or f"{decision} by policy {rule}".strip()
-            if decision == "BLOCK":
-                event.cancel_tool = msg
-                self._pending_tool_calls[key] = CancelledToolCall("BLOCK")
-                logger.warning("[T4] BLOCK tool %s (rule=%s): %s", tool_name, rule, msg)
-            elif decision == "GATE":
-                status = self._enforcer.await_gate(verdict.get("approval") or {})
-                if status == "approved":
-                    logger.info(
-                        "[T4] GATE approved for tool %s (rule=%s); proceeding",
-                        tool_name,
-                        rule,
-                    )
-                else:
-                    event.cancel_tool = f"{msg} (approval {status})"
-                    self._pending_tool_calls[key] = CancelledToolCall("GATE")
-                    logger.warning(
-                        "[T4] GATE %s for tool %s (rule=%s)", status, tool_name, rule
-                    )
+            allowed, message = finish_enforcement(self._enforcer, verdict)
+            if not allowed:
+                event.cancel_tool = message
+                self._pending_tool_calls[key] = CancelledToolCall(
+                    "GATE" if decision == "GATE" else "BLOCK"
+                )
+                logger.warning(
+                    "[T4] Tool %s cancelled (rule=%s): %s", tool_name, rule, message
+                )
 
             state = self._pending_tool_calls.get(key)
             reference = verdict.get("observation_reference")
