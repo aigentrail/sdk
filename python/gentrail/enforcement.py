@@ -20,7 +20,13 @@ import urllib.request
 import uuid
 from typing import Any, Callable
 
-from .admission import AdmissionClient, NoRedirect, PROTOCOL, same_origin_link
+from .admission import (
+    AdmissionClient,
+    NoRedirect,
+    PROTOCOL,
+    QuotaExhaustedError,
+    same_origin_link,
+)
 
 from .observation_reference import DECISION_OUTCOMES, checked_reference
 
@@ -156,6 +162,11 @@ class PolicyEnforcer:
         try:
             self._admission.authorize(
                 verdict.get("_request_id", ""), verdict["admission"]
+            )
+        except QuotaExhaustedError:
+            return (
+                False,
+                "This agent has used its tool-call allowance for the current quota window.",
             )
         except Exception as error:
             logger.warning("tool-call admission failed (%s)", error)

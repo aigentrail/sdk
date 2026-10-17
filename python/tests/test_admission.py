@@ -112,12 +112,17 @@ def test_shared_admission_vectors_sync_and_async():
                 sync = enforcer(endpoint)
                 if asynchronous:
                     client = enforcement.AsyncPolicyEnforcer.from_sync(sync)
-                    allowed, _ = asyncio.run(
+                    allowed, message = asyncio.run(
                         enforcement.enforce_async(client, "Read", {})
                     )
                 else:
-                    allowed, _ = enforcement.enforce(sync, "Read", {})
+                    allowed, message = enforcement.enforce(sync, "Read", {})
                 assert allowed == vector["allowed"], (vector["name"], asynchronous)
+                if vector["name"] == "quota exhausted":
+                    assert (
+                        message
+                        == "This agent has used its tool-call allowance for the current quota window."
+                    )
                 assert calls[0][1]["admission_protocol"] == "quota_v1"
                 assert len(consumes) <= 1
 

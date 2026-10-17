@@ -16,6 +16,10 @@ BODY_SIZE_MAX = 65536
 DEADLINE_SECONDS = 9.0
 
 
+class QuotaExhaustedError(ValueError):
+    pass
+
+
 class NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl) -> None:
         return None
@@ -78,7 +82,7 @@ class AdmissionClient:
                 connection, link.get("reserve_url"), digest, deadline
             )
             if reserved.get("outcome") == "quota_exhausted":
-                raise ValueError("tool-call allowance exhausted")
+                raise QuotaExhaustedError("tool-call allowance exhausted")
             expected = self.checked_receipt(reserved, request_id, "reserved")
             if reserved.get("execution_authorized", False) is not False:
                 raise ValueError("reservation cannot authorize execution")
