@@ -3,6 +3,7 @@ import copy
 import importlib
 import json
 import pathlib
+import os
 import socket
 import sys
 import threading
@@ -58,7 +59,7 @@ def server(
                     response["execution_authorized"] = False
             else:
                 raise AssertionError(self.path)
-            if redirect:
+            if redirect and self.path == "/reserve":
                 self.send_response(307)
                 self.send_header("Location", "/unexpected")
                 self.end_headers()
@@ -219,6 +220,24 @@ def test_strict_decision_metadata_and_no_quota_behavior():
     ) as (endpoint, calls, consumes):
         assert enforcement.enforce(enforcer(endpoint), "Read", {})[0]
         assert len(calls) == 1
+
+
+def test_strict_environment_setup_cannot_silently_disable_enforcement():
+    names = ("GENTRAIL_DECIDE_ENDPOINT", "GENTRAIL_API_KEY")
+    saved = {name: os.environ.pop(name, None) for name in names}
+    try:
+        for client in (enforcement.PolicyEnforcer, enforcement.AsyncPolicyEnforcer):
+            assert client.from_env() is None
+            try:
+                client.from_env(strict_admission=True)
+            except ValueError:
+                pass
+            else:
+                raise AssertionError("strict setup silently disabled enforcement")
+    finally:
+        for name, value in saved.items():
+            if value is not None:
+                os.environ[name] = value
 
 
 if __name__ == "__main__":

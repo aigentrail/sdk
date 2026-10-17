@@ -71,6 +71,10 @@ class PolicyEnforcer:
         endpoint = os.environ.get("GENTRAIL_DECIDE_ENDPOINT", "").strip()
         api_key = os.environ.get("GENTRAIL_API_KEY", "").strip()
         if not endpoint or not api_key:
+            if strict_admission:
+                raise ValueError(
+                    "Strict admission needs a decide endpoint and agent-bound API key"
+                )
             return None
         return cls(endpoint, api_key, strict_admission=strict_admission)
 

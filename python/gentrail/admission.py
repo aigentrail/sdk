@@ -64,20 +64,36 @@ class AdmissionClient:
         if len(bytes.fromhex(digest)) != 32:
             raise ValueError("invalid proposal hash")
         deadline = self.monotonic() + DEADLINE_SECONDS
-        reserved = self.exchange(link.get("reserve_url"), digest, deadline)
-        if reserved.get("outcome") == "quota_exhausted":
-            raise ValueError("tool-call allowance exhausted")
-        expected = self.checked_receipt(reserved, request_id, "reserved")
-        if reserved.get("execution_authorized", False) is not False:
-            raise ValueError("reservation cannot authorize execution")
-        consumed = self.exchange(reserved.get("consume_url"), digest, deadline)
-        actual = self.checked_receipt(consumed, request_id, "consumed")
-        if consumed.get("execution_authorized") is not True:
-            raise ValueError("execution was not authorized")
-        if actual != {**expected, "state": "consumed"}:
-            raise ValueError("reservation changed during consumption")
-        if self.monotonic() >= deadline:
-            raise TimeoutError("admission deadline exceeded")
+        target = urlsplit(same_origin_link(self.endpoint, link.get("reserve_url")))
+        connection_type = (
+            http.client.HTTPSConnection
+            if target.scheme == "https"
+            else http.client.HTTPConnection
+        )
+        connection = connection_type(
+            target.hostname, target.port, timeout=min(self.timeout, 3.0)
+        )
+        try:
+            reserved = self.exchange(
+                connection, link.get("reserve_url"), digest, deadline
+            )
+            if reserved.get("outcome") == "quota_exhausted":
+                raise ValueError("tool-call allowance exhausted")
+            expected = self.checked_receipt(reserved, request_id, "reserved")
+            if reserved.get("execution_authorized", False) is not False:
+                raise ValueError("reservation cannot authorize execution")
+            consumed = self.exchange(
+                connection, reserved.get("consume_url"), digest, deadline
+            )
+            actual = self.checked_receipt(consumed, request_id, "consumed")
+            if consumed.get("execution_authorized") is not True:
+                raise ValueError("execution was not authorized")
+            if actual != {**expected, "state": "consumed"}:
+                raise ValueError("reservation changed during consumption")
+            if self.monotonic() >= deadline:
+                raise TimeoutError("admission deadline exceeded")
+        finally:
+            connection.close()
 
     def checked_receipt(self, receipt: dict, request_id: str, state: str) -> dict:
         reservation = receipt.get("reservation")
@@ -112,23 +128,24 @@ class AdmissionClient:
             )
         }
 
-    def exchange(self, link: str, digest: str, deadline: float) -> dict:
+    def exchange(
+        self,
+        connection: http.client.HTTPConnection,
+        link: str,
+        digest: str,
+        deadline: float,
+    ) -> dict:
         target = same_origin_link(self.endpoint, link)
         remaining = deadline - self.monotonic()
         if remaining <= 0:
             raise TimeoutError("admission deadline exceeded")
         parsed = urlsplit(target)
-        connection_type = (
-            http.client.HTTPSConnection
-            if parsed.scheme == "https"
-            else http.client.HTTPConnection
-        )
-        connection = connection_type(
-            parsed.hostname, parsed.port, timeout=min(self.timeout, 3.0, remaining)
-        )
         timer = None
         try:
-            connection.connect()
+            connection.timeout = min(self.timeout, 3.0, remaining)
+            if connection.sock is None:
+                connection.connect()
+            connection.sock.settimeout(connection.timeout)
             remaining = deadline - self.monotonic()
             if remaining <= 0:
                 raise TimeoutError("admission deadline exceeded")
@@ -162,7 +179,6 @@ class AdmissionClient:
         finally:
             if timer is not None:
                 timer.cancel()
-            connection.close()
 
 
 def interrupt_transport(transport: socket.socket) -> None:
