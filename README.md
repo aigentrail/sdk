@@ -23,7 +23,7 @@ are native to each ecosystem; the table records current implementation support.
 | Redaction of GenAI attributes on spans other libraries emit | `instrument()` | `Instrument()` | `instrument()` |
 | Inline enforcement: decide (fails open) and gate wait (fails closed) | `PolicyEnforcer` | `Enforcer` | `PolicyEnforcer` |
 | One decide-and-gate cycle | `enforce()` | `Enforcer.Enforce` | `PolicyEnforcer.enforce` |
-| Strict tool-call quota admission, explicit opt-in | `strict_admission=True` (sync and async) | `WithStrictAdmission()` | pending |
+| Strict tool-call quota admission, explicit opt-in | `strict_admission=True` (sync and async) | `WithStrictAdmission()` | `strictAdmission: true` |
 | Evidence ledger with sealed, hash-verified decision journals | `EvidenceLedger` | `EvidenceLedger` | `EvidenceLedger` |
 | HTTP model-call instrumentation | `tracer.httpx_transport()` | `Tracer.HTTPRoundTripper` | `tracer.fetch()` |
 | Framework adapters | Strands, LangChain, OpenAI Agents | none | Vercel AI SDK (`guardTools`) |
@@ -31,8 +31,8 @@ are native to each ecosystem; the table records current implementation support.
 Parity is enforced by shared specs in [`spec/`](spec/) that every SDK's tests
 read: the PII redaction corpus, decision-journal hash vectors (SHA-256 over RFC
 8785 canonical JSON), enforcement outcomes, and the required span names and
-attributes. Go and Python also run the same strict-admission receipt vectors
-(`spec/admission_vectors.json`); TypeScript adoption is the remaining quota gap.
+attributes. All three SDKs also run the same strict-admission receipt vectors
+(`spec/admission_vectors.json`).
 The PII detector's rule data is vendored byte-identically into each
 SDK by `scripts/sync-pii-data.sh`, and CI checks the copies match.
 
@@ -57,3 +57,7 @@ All SDKs read the same environment variables:
 - `GENTRAIL_DECIDE_ENDPOINT`: enables inline enforcement.
 - `GENTRAIL_GATE_TIMEOUT_SECONDS`: how long a gated tool call waits for approval (default 120).
 - `GENTRAIL_REDACT_PII=false`: disables client-side PII redaction.
+
+Shared capability changes must include all three SDK implementations and shared
+conformance vectors in the same task. See [`spec/README.md`](spec/README.md) for
+the behavioral contract and coverage boundaries.

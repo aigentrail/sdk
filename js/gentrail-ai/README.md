@@ -12,6 +12,38 @@ installs through an npm install script, so if your npm or CI blocks install
 scripts, allow it for `re2` (for example `npm install-scripts approve re2` on
 npm 11).
 
+## Strict tool-call quotas
+
+Use an agent-bound API key and opt into fail-closed enforcement:
+
+```typescript
+import { PolicyEnforcer, guardTools } from "@gentrail/ai";
+
+const enforcer = new PolicyEnforcer({ endpoint, apiKey: boundAgentKey, strictAdmission: true });
+const outcome = await enforcer.enforce("issue_refund", arguments, { requestId: toolCallId });
+if (!outcome.allowed) throw new Error(outcome.message);
+const result = await issueRefund(arguments);
+
+const guarded = guardTools(tools, { endpoint, apiKey: boundAgentKey, strictAdmission: true });
+```
+
+`PolicyEnforcer.fromEnv({ strictAdmission: true })` uses the existing endpoint
+and key variables. Missing configuration in explicit strict setup raises an
+error. `guardTools` carries strict enforcement into the Vercel AI tool boundary.
+
+Enforcement resolves approval, then reserves and consumes capacity once before
+returning permission to run. Outages, unknown outcomes, expired or malformed
+receipts, foreign controls, redirects and lost consume replies block execution.
+A repeated request ID cannot reuse consumed authority. A crash, tool failure or
+later host refusal leaves the consumed attempt charged. Never retry execution
+because evidence reporting failed.
+
+Low-level `decide` and `awaitGate` do not grant quota execution authority.
+Admission has a nine-second total budget, at most three seconds per request and
+64 KiB receipts; consume is never retried. Non-quota decisions add no reservation
+requests. Without strict opt-in, decision outages retain their existing
+fail-open behavior; receiving an admission resource still requires strict support.
+
 ## Quickstart
 
 ```bash
