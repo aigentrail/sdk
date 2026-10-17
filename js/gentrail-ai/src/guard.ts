@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { PolicyEnforcer } from "./enforcement.js";
 
 export interface GuardOptions {
+  strictAdmission?: boolean;
   endpoint?: string;
   apiKey?: string;
   agentId?: string;
@@ -30,21 +31,36 @@ interface ToolExecuteOptions {
 
 type ToolExecute = (...args: never[]) => unknown;
 
-type ExecuteWithOptions = (input: unknown, options?: ToolExecuteOptions) => unknown;
+type ExecuteWithOptions = (
+  input: unknown,
+  options?: ToolExecuteOptions,
+) => unknown;
 
 interface GuardableTool {
   execute?: ToolExecute;
 }
 
-function enforcerFromGuardOptions(options: GuardOptions): PolicyEnforcer | null {
-  const endpoint = (options.endpoint ?? process.env.GENTRAIL_DECIDE_ENDPOINT ?? "").trim();
+function enforcerFromGuardOptions(
+  options: GuardOptions,
+): PolicyEnforcer | null {
+  const endpoint = (
+    options.endpoint ??
+    process.env.GENTRAIL_DECIDE_ENDPOINT ??
+    ""
+  ).trim();
   const apiKey = (options.apiKey ?? process.env.GENTRAIL_API_KEY ?? "").trim();
   if (endpoint === "" || apiKey === "") {
+    if (options.strictAdmission) {
+      throw new Error(
+        "Strict admission needs a decide endpoint and agent-bound API key",
+      );
+    }
     return null;
   }
   return new PolicyEnforcer({
     endpoint,
     apiKey,
+    strictAdmission: options.strictAdmission,
     decideTimeoutMs: options.decideTimeoutMs,
     gateTimeoutMs: options.gateTimeoutMs,
     gatePollIntervalMs: options.gatePollIntervalMs,
@@ -60,7 +76,10 @@ export function guardTools<T extends Record<string, object>>(
     return tools;
   }
   const guarded: Record<string, object> = {};
-  for (const [name, tool] of Object.entries(tools) as [string, GuardableTool][]) {
+  for (const [name, tool] of Object.entries(tools) as [
+    string,
+    GuardableTool,
+  ][]) {
     const execute = tool.execute;
     if (typeof execute !== "function") {
       guarded[name] = tool;
@@ -68,7 +87,12 @@ export function guardTools<T extends Record<string, object>>(
     }
     guarded[name] = {
       ...tool,
-      execute: guardedExecute(enforcer, name, execute as ExecuteWithOptions, options),
+      execute: guardedExecute(
+        enforcer,
+        name,
+        execute as ExecuteWithOptions,
+        options,
+      ),
     };
   }
   return guarded as T;
@@ -87,7 +111,11 @@ function guardedExecute(
       requestId: executeOptions?.toolCallId ?? randomUUID(),
     });
     if (!outcome.allowed) {
-      throw new GentrailPolicyError(outcome.message, outcome.decision, outcome.rule);
+      throw new GentrailPolicyError(
+        outcome.message,
+        outcome.decision,
+        outcome.rule,
+      );
     }
     return execute(input, executeOptions);
   }) as ToolExecute;

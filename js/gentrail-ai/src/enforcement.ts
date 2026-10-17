@@ -1,4 +1,11 @@
 import { randomUUID } from "node:crypto";
+import {
+  ADMISSION_PROTOCOL,
+  AdmissionClient,
+  QuotaExhaustedError,
+  boundedJson,
+  sameOriginLink,
+} from "./admission.js";
 
 import {
   checkedReference,
@@ -13,6 +20,7 @@ export interface Approval {
 }
 
 export interface Verdict {
+  admission?: unknown;
   outcome?: DecisionOutcome;
   observation_reference?: DecisionReference;
   observations_url?: string;
@@ -25,6 +33,9 @@ export interface Verdict {
 export interface PolicyEnforcerOptions {
   endpoint: string;
   apiKey: string;
+  strictAdmission?: boolean;
+  now?: () => number;
+  idGen?: () => string;
   decideTimeoutMs?: number;
   gateTimeoutMs?: number;
   gatePollIntervalMs?: number;
@@ -51,6 +62,10 @@ const GATE_POLL_INTERVAL_MS_DEFAULT = 2000;
 const INVALID_TRACE_ID = "00000000000000000000000000000000";
 
 export class PolicyEnforcer {
+  readonly strictAdmission: boolean;
+  private readonly admission: AdmissionClient;
+  private readonly requestIds = new WeakMap<Verdict, string>();
+  private readonly idGen: () => string;
   readonly endpoint: string;
   readonly apiKey: string;
   readonly decideTimeoutMs: number;
@@ -66,9 +81,20 @@ export class PolicyEnforcer {
     if (apiKey === "") {
       throw new Error("PolicyEnforcer needs an API key");
     }
+    this.strictAdmission = options.strictAdmission === true;
+    this.idGen = options.idGen ?? randomUUID;
+    this.admission = new AdmissionClient(
+      endpoint + "/api/v1/decide",
+      apiKey,
+      positiveOrDefault(options.decideTimeoutMs, DECIDE_TIMEOUT_MS_DEFAULT),
+      options.now,
+    );
     this.endpoint = endpoint;
     this.apiKey = apiKey;
-    this.decideTimeoutMs = positiveOrDefault(options.decideTimeoutMs, DECIDE_TIMEOUT_MS_DEFAULT);
+    this.decideTimeoutMs = positiveOrDefault(
+      options.decideTimeoutMs,
+      DECIDE_TIMEOUT_MS_DEFAULT,
+    );
     this.gateTimeoutMs = options.gateTimeoutMs ?? gateTimeoutMsFromEnv();
     this.gatePollIntervalMs = positiveOrDefault(
       options.gatePollIntervalMs,
@@ -76,22 +102,36 @@ export class PolicyEnforcer {
     );
   }
 
-  static fromEnv(): PolicyEnforcer | null {
+  static fromEnv(
+    options: { strictAdmission?: boolean } = {},
+  ): PolicyEnforcer | null {
     const endpoint = (process.env.GENTRAIL_DECIDE_ENDPOINT ?? "").trim();
     const apiKey = (process.env.GENTRAIL_API_KEY ?? "").trim();
     if (endpoint === "" || apiKey === "") {
+      if (options.strictAdmission) {
+        throw new Error(
+          "Strict admission needs a decide endpoint and agent-bound API key",
+        );
+      }
       return null;
     }
-    return new PolicyEnforcer({ endpoint, apiKey });
+    return new PolicyEnforcer({ endpoint, apiKey, ...options });
   }
 
-  async decide(toolName: string, toolArgs: unknown, options: DecideOptions = {}): Promise<Verdict> {
+  async decide(
+    toolName: string,
+    toolArgs: unknown,
+    options: DecideOptions = {},
+  ): Promise<Verdict> {
     const payload: Record<string, unknown> = {
       event_type: "tool_call",
       tool_name: toolName,
       tool_args: toolArgs ?? {},
-      request_id: options.requestId || randomUUID(),
+      request_id: options.requestId || this.idGen(),
     };
+    if (this.strictAdmission) {
+      payload.admission_protocol = ADMISSION_PROTOCOL;
+    }
     if (options.agentId) {
       payload.agent_id = options.agentId;
     }
@@ -100,10 +140,20 @@ export class PolicyEnforcer {
       payload.invocation_id = invocationId;
     }
     try {
-      return await this.postDecide(payload);
+      const verdict = await this.postDecide(payload);
+      this.requestIds.set(verdict, String(payload.request_id));
+      if (this.strictAdmission && verdict.outcome !== "verified") {
+        verdict.decision = "BLOCK";
+      }
+      return verdict;
     } catch (err) {
-      console.warn(`gentrail decide failed (${String(err)}); allowing tool ${toolName}`);
-      return { decision: "ALLOW", outcome: "unavailable" };
+      console.warn(
+        `gentrail decide failed (${String(err)}) for tool ${toolName}`,
+      );
+      return {
+        decision: this.strictAdmission ? "BLOCK" : "ALLOW",
+        outcome: "unavailable",
+      };
     }
   }
 
@@ -112,14 +162,21 @@ export class PolicyEnforcer {
     if (!statusUrl) {
       return "timeout";
     }
-    const pollUrl = this.endpoint + statusUrl;
+    let pollUrl: string;
+    try {
+      pollUrl = sameOriginLink(this.endpoint + "/api/v1/decide", statusUrl);
+    } catch {
+      return "timeout";
+    }
     const deadline = performance.now() + this.gateTimeoutMs;
     for (;;) {
       let status: string;
       try {
         status = await this.pollGateOnce(pollUrl);
       } catch (err) {
-        console.warn(`gentrail gate poll failed (${String(err)}); holding the gate closed`);
+        console.warn(
+          `gentrail gate poll failed (${String(err)}); holding the gate closed`,
+        );
         return "timeout";
       }
       if (status !== "pending") {
@@ -141,20 +198,58 @@ export class PolicyEnforcer {
     const decision = verdict.decision ?? "";
     const rule = verdict.rule ?? "";
     if (decision === "BLOCK") {
-      return { verdict, allowed: false, message: verdictMessage(verdict), decision, rule };
-    }
-    if (decision === "GATE") {
-      const status = await this.awaitGate(verdict.approval);
-      if (status === "approved") {
-        return { verdict, allowed: true, message: "", decision, rule };
-      }
       return {
         verdict,
         allowed: false,
-        message: `${verdictMessage(verdict)} (approval ${status})`,
+        message: verdictMessage(verdict),
         decision,
         rule,
       };
+    }
+    if (decision === "GATE") {
+      const status = await this.awaitGate(verdict.approval);
+      if (status !== "approved") {
+        return {
+          verdict,
+          allowed: false,
+          message: `${verdictMessage(verdict)} (approval ${status})`,
+          decision,
+          rule,
+        };
+      }
+    }
+    if (Object.hasOwn(verdict, "admission")) {
+      try {
+        if (!this.strictAdmission) {
+          throw new Error(
+            "Strict tool-call quotas require strictAdmission and an agent-bound credential.",
+          );
+        }
+        await this.admission.authorize(
+          this.requestIds.get(verdict) ?? "",
+          verdict.admission,
+        );
+      } catch (error) {
+        if (error instanceof QuotaExhaustedError) {
+          return {
+            verdict,
+            allowed: false,
+            message:
+              "This agent has used its tool-call allowance for the current quota window.",
+            decision,
+            rule,
+          };
+        }
+        console.warn(`gentrail admission failed (${String(error)})`);
+        return {
+          verdict,
+          allowed: false,
+          message:
+            "Gentrail could not authorize this tool-call attempt; the call was not run.",
+          decision,
+          rule,
+        };
+      }
     }
     return { verdict, allowed: true, message: "", decision, rule };
   }
@@ -162,6 +257,7 @@ export class PolicyEnforcer {
   private async postDecide(payload: Record<string, unknown>): Promise<Verdict> {
     const response = await fetch(`${this.endpoint}/api/v1/decide`, {
       method: "POST",
+      redirect: "error",
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${this.apiKey}`,
@@ -171,20 +267,26 @@ export class PolicyEnforcer {
       signal: AbortSignal.timeout(this.decideTimeoutMs),
     });
     if (!response.ok) {
+      await response.body?.cancel();
       throw new Error(`decide returned ${response.status}`);
     }
-    return parseVerdict(await response.json(), payload);
+    return parseVerdict(await boundedJson(response, 2 * 1024 * 1024), payload);
   }
 
   private async pollGateOnce(pollUrl: string): Promise<string> {
     const response = await fetch(pollUrl, {
-      headers: { Authorization: `Bearer ${this.apiKey}`, "User-Agent": USER_AGENT },
+      redirect: "error",
+      headers: {
+        Authorization: `Bearer ${this.apiKey}`,
+        "User-Agent": USER_AGENT,
+      },
       signal: AbortSignal.timeout(this.decideTimeoutMs),
     });
     if (!response.ok) {
+      await response.body?.cancel();
       throw new Error(`gate status returned ${response.status}`);
     }
-    const body: unknown = await response.json();
+    const body: unknown = await boundedJson(response, 65536);
     if (!isRecord(body)) {
       throw new Error("gate status is not a JSON object");
     }
@@ -198,7 +300,10 @@ export class PolicyEnforcer {
   }
 }
 
-function parseVerdict(body: unknown, request: Record<string, unknown>): Verdict {
+function parseVerdict(
+  body: unknown,
+  request: Record<string, unknown>,
+): Verdict {
   if (!isRecord(body)) {
     throw new Error("decide verdict is not a JSON object");
   }
@@ -206,10 +311,17 @@ function parseVerdict(body: unknown, request: Record<string, unknown>): Verdict 
     body.outcome === "verified" || body.outcome === "request_conflict"
       ? body.outcome
       : "unavailable";
-  if (body.decision !== "ALLOW" && body.decision !== "BLOCK" && body.decision !== "GATE") {
+  if (
+    body.decision !== "ALLOW" &&
+    body.decision !== "BLOCK" &&
+    body.decision !== "GATE"
+  ) {
     outcome = "unavailable";
   }
   const verdict: Verdict = { outcome };
+  if (Object.hasOwn(body, "admission")) {
+    verdict.admission = body.admission;
+  }
   if (outcome === "verified") {
     const reference = checkedReference(body.observation_reference, request);
     if (reference !== undefined) {
@@ -230,13 +342,18 @@ function parseVerdict(body: unknown, request: Record<string, unknown>): Verdict 
   }
   if (isRecord(body.approval)) {
     verdict.approval =
-      typeof body.approval.status_url === "string" ? { status_url: body.approval.status_url } : {};
+      typeof body.approval.status_url === "string"
+        ? { status_url: body.approval.status_url }
+        : {};
   }
   return verdict;
 }
 
 export function verdictMessage(verdict: Verdict): string {
-  return verdict.message || `${verdict.decision ?? ""} by policy ${verdict.rule ?? ""}`.trim();
+  return (
+    verdict.message ||
+    `${verdict.decision ?? ""} by policy ${verdict.rule ?? ""}`.trim()
+  );
 }
 
 export function ambientOtelTraceId(): string {
@@ -249,7 +366,8 @@ export function ambientOtelTraceId(): string {
 
 function gateTimeoutMsFromEnv(): number {
   const seconds = Number(
-    process.env.GENTRAIL_GATE_TIMEOUT_SECONDS ?? String(GATE_TIMEOUT_SECONDS_DEFAULT),
+    process.env.GENTRAIL_GATE_TIMEOUT_SECONDS ??
+      String(GATE_TIMEOUT_SECONDS_DEFAULT),
   );
   if (!Number.isFinite(seconds) || seconds < 0) {
     return GATE_TIMEOUT_SECONDS_DEFAULT * 1000;
@@ -257,7 +375,10 @@ function gateTimeoutMsFromEnv(): number {
   return seconds * 1000;
 }
 
-function positiveOrDefault(value: number | undefined, fallback: number): number {
+function positiveOrDefault(
+  value: number | undefined,
+  fallback: number,
+): number {
   if (value === undefined) {
     return fallback;
   }
