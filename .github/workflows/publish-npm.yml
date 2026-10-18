@@ -1,11 +1,14 @@
 name: publish-npm
-
 on:
   push:
     tags: ['js-v*']
-
 jobs:
+  packages:
+    uses: ./.github/workflows/release.yml
+    permissions:
+      contents: read
   npm:
+    needs: packages
     runs-on: ubuntu-latest
     environment: npm
     permissions:
@@ -15,12 +18,11 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
           registry-url: https://registry.npmjs.org
       - run: npm install -g npm@^11.5.1
-      - run: npm ci
-        working-directory: js/gentrail-ai
-      - run: npm test
-        working-directory: js/gentrail-ai
-      - run: npm publish --provenance --access public
-        working-directory: js/gentrail-ai
+      - uses: actions/download-artifact@v4
+        with:
+          name: sdk-packages
+          path: packages
+      - run: npm publish packages/javascript/gentrail-ai-*.tgz --provenance --access public

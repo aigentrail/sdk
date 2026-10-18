@@ -9,6 +9,9 @@ github.com/aigentrail/sdk/go`).
 
 ## Strict tool-call quotas
 
+Available in the 0.8.0 release set. See [release preparation](../RELEASE.md)
+for package verification and rollout.
+
 Use an agent-bound API key and opt into fail-closed enforcement:
 
 ```python

@@ -1,6 +1,6 @@
 [project]
 name = "gentrail"
-version = "0.7.0"
+version = "0.8.0"
 description = "Gentrail SDK: governance hooks, inline policy enforcement, and telemetry capture for AI agents"
 readme = "README.md"
 license = {text = "Apache-2.0"}

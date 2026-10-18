@@ -46,7 +46,9 @@ Two guarantees hold in every SDK:
   (`spec/spans.json` `export_filter`), so an app's HTTP and database spans are
   never sent.
 
-Requirements: Python 3.10+, Go 1.25+, Node 22+.
+Requirements: Python 3.10+, Go 1.25.7+, Node 22+.
+
+See [release preparation](RELEASE.md) for package versions, verification and rollout.
 
 ## Configuration
 
