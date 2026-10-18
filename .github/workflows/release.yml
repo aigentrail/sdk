@@ -1,0 +1,34 @@
+name: release
+on:
+  workflow_call:
+  pull_request:
+  push:
+    branches: [main]
+    tags: ['go/v*']
+permissions:
+  contents: read
+jobs:
+  packages:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: '3.13'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+      - run: go test scripts/releasecheck/main.go scripts/releasecheck/main_test.go
+      - run: go run scripts/releasecheck/main.go python
+      - run: go run scripts/releasecheck/main.go javascript
+      - run: go run scripts/releasecheck/main.go go
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sdk-packages
+          path: dist/release/
+          if-no-files-found: error

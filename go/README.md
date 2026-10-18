@@ -24,7 +24,8 @@ The dependency-free `admission` package implements the same bounded protocol
 for host integrations. It rejects foreign links, redirects, stale or malformed
 receipts and lost consume replies. Constructors without `WithStrictAdmission`
 retain their existing outage policy and do not advertise strict quota support.
-Python and JavaScript clients require separate adoption.
+Python and JavaScript implement the same protocol with their native strict
+admission options. See the [release notes](../RELEASE.md) for versions and rollout.
 
 The Go governance SDK for Gentrail. It emits OpenTelemetry spans for agent
 invocations, LLM calls, and tool calls over OTLP/HTTP, enforces policy on tool

@@ -1,6 +1,6 @@
 {
   "name": "@gentrail/ai",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Gentrail SDK: governance tracing, PII redaction, inline policy enforcement, and evidence capture for AI agents",
   "license": "Apache-2.0",
   "repository": {
@@ -27,6 +27,7 @@
   },
   "scripts": {
     "build": "tsc",
+    "prepack": "npm run build",
     "test": "tsc && node --test dist/test/*.test.js"
   },
   "devDependencies": {
