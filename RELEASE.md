@@ -71,11 +71,11 @@ they do not certify hosted providers or live AWS latency.
 
 ## Rollout
 
-After this PR merges and its checks pass, create all three tags on the same
-reviewed commit. Python and npm use the existing trusted-publishing environments.
-Verify both publish jobs and install all three versions from their public
-registries, then update Gentrail's Go dependency and cross-language conformance
-pin together to that commit. Version and pin verification must support the Go
-release tag rather than assuming every dependency uses a pseudoversion.
+After this PR merges and its checks pass, create only `js-v0.4.1` on the merged
+commit. The existing `v0.8.0` and `go/v0.6.0` tags remain on their original release
+commit. Verify the npm publish job and install 0.4.1 from the public registry.
+Then update Gentrail's Go dependency and cross-language conformance pin together;
+version and pin verification must support the Go release tag rather than assuming
+every dependency uses a pseudoversion.
 
 This release PR prepares JavaScript 0.4.1; publication follows merge.
