@@ -14,7 +14,7 @@ npm 11).
 
 ## Strict tool-call quotas
 
-Available in the 0.4.0 release set. See [release preparation](../../RELEASE.md)
+Available since 0.4.0. See [release preparation](../../RELEASE.md)
 for package verification and rollout.
 
 Use an agent-bound API key and opt into fail-closed enforcement:

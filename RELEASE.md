@@ -7,11 +7,17 @@ unchanged. Strict admission requires explicit opt-in and an agent-bound key.
 | Package | Version | Release tag |
 | --- | --- | --- |
 | Python `gentrail` | 0.8.0 | `v0.8.0` |
-| JavaScript `@gentrail/ai` | 0.4.0 | `js-v0.4.0` |
+| JavaScript `@gentrail/ai` | 0.4.1 | `js-v0.4.1` |
 | Go `github.com/aigentrail/sdk/go` | 0.6.0 | `go/v0.6.0` |
 
 Versions follow each package's existing sequence. `release.json` records the
 release set; CI rejects mismatched manifests, locks and release tags.
+
+Python 0.8.0 and Go 0.6.0 have been released. JavaScript 0.4.0 bootstraps the
+npm package; 0.4.1 validates GitHub trusted publishing and provenance with the
+same runtime behavior. The npm trust connection permits `publish-npm.yml` in
+`aigentrail/sdk` using the `npm` environment. Its first successful CI publish
+must complete within two days of configuration to activate the connection.
 
 ## Behavior
 
@@ -65,11 +71,11 @@ they do not certify hosted providers or live AWS latency.
 
 ## Rollout
 
-After this PR merges and its checks pass, create all three tags on the same
-reviewed commit. Python and npm use the existing trusted-publishing environments.
-Verify both publish jobs and install all three versions from their public
-registries, then update Gentrail's Go dependency and cross-language conformance
-pin together to that commit. Version and pin verification must support the Go
-release tag rather than assuming every dependency uses a pseudoversion.
+After this PR merges and its checks pass, create only `js-v0.4.1` on the merged
+commit. The existing `v0.8.0` and `go/v0.6.0` tags remain on their original release
+commit. Verify the npm publish job and install 0.4.1 from the public registry.
+Then update Gentrail's Go dependency and cross-language conformance pin together;
+version and pin verification must support the Go release tag rather than assuming
+every dependency uses a pseudoversion.
 
-The PR prepares publication. It does not create tags or publish packages.
+This release PR prepares JavaScript 0.4.1; publication follows merge.
