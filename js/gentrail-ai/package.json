@@ -1,6 +1,6 @@
 {
   "name": "@gentrail/ai",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "Gentrail SDK: governance tracing, PII redaction, inline policy enforcement, and evidence capture for AI agents",
   "license": "Apache-2.0",
   "repository": {
