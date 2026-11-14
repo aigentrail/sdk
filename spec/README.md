@@ -8,7 +8,8 @@ vectors before the task is complete. Each SDK's CI reads these files directly.
 | Contract | Shared proof |
 | --- | --- |
 | Policy allow/block and approval outcomes | `enforce_vectors.json` |
-| Strict quota receipts: one-time authority, request/revision/window binding, expiry, exhaustion, same-origin controls | `admission_vectors.json` |
+| Retired quota receipts: one-time authority, request/revision/window binding, expiry, exhaustion, same-origin controls | `admission_vectors.json` |
+| Mandatory operation admission: one-time authority, policy binding, bounded leases and same-origin controls | `operation_admission_vectors.json` |
 | Decision-linked execution evidence and full original argument hashes | `observation_vectors.json` |
 | PII detection and redaction | `pii_conformance.json` plus identical detector data |
 | Journal canonicalization and integrity hashes | `journal_vectors.json` |
@@ -22,7 +23,11 @@ and OpenAI Agents; TypeScript covers its async client and Vercel `guardTools`;
 Go covers context-aware enforcement and its shared host admission client.
 Framework availability is ecosystem-specific and is recorded in the root matrix.
 
-Strict admission is an explicit opt-in with an agent-bound credential. Policy
+D3 operation admission is mandatory for configured enforcement and uses an
+agent-bound credential plus a registered tool identity. Go consumes the operation
+vectors; JavaScript and Python migration remains pending. The quota vectors
+retain the previous contract for those clients and are rejection cases in Go.
+They do not establish D3 parity. Policy
 reads do not grant execution authority. The server remains the sole owner of
 policy evaluation and quota state. Attempts remain charged after consumption,
 including crashes, tool failures and later host refusals. Telemetry-only AWS
