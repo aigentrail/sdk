@@ -16,7 +16,13 @@ func (e *Enforcer) authorizeAdmission(ctx context.Context, verdict Verdict) (boo
 		if errors.Is(err, admission.ErrQuotaExhausted) {
 			return false, "This agent has used its tool-call allowance for the current quota window."
 		}
-		return false, "Gentrail could not authorize this tool-call attempt; the call was not run."
+		if errors.Is(err, admission.ErrAttemptClosed) {
+			return false, "This tool-call attempt is already consumed or canceled. Check its outcome before starting a new attempt."
+		}
+		if errors.Is(err, admission.ErrConsumptionUncertain) {
+			return false, "Gentrail could not confirm execution admission. Do not retry automatically; check this attempt's outcome before starting another."
+		}
+		return false, "Gentrail could not authorize this tool-call attempt. Review its status before starting another."
 	}
 	return true, ""
 }

@@ -26,6 +26,9 @@ func TestStrictEnforcementApprovesThenConsumesOnlyOnce(t *testing.T) {
 			if allowed != want {
 				t.Fatalf("allowed=%v want=%v message=%s", allowed, want, message)
 			}
+			if !want && !strings.Contains(message, "already consumed or canceled") {
+				t.Fatal("closed attempt lost its recovery guidance", message)
+			}
 		}
 		server.Close()
 		fixture.mu.Lock()

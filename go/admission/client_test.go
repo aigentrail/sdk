@@ -3,6 +3,7 @@ package admission
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -11,6 +12,51 @@ import (
 	"testing"
 	"time"
 )
+
+func TestAdmissionReportsClosedAndUncertainAttemptsWithoutRetrying(t *testing.T) {
+	for _, scenario := range []string{"consumed", "released", "reply-lost", "reply-malformed"} {
+		t.Run(scenario, func(t *testing.T) {
+			var consumes atomic.Uint32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/consume" {
+					consumes.Add(1)
+					if scenario == "reply-lost" {
+						connection, _, err := w.(http.Hijacker).Hijack()
+						if err != nil {
+							t.Error(err)
+							return
+						}
+						if err := connection.Close(); err != nil {
+							t.Error(err)
+						}
+						return
+					}
+					if _, err := io.WriteString(w, `{}`); err != nil {
+						t.Error(err)
+					}
+					return
+				}
+				state := "reserved"
+				if scenario == "consumed" || scenario == "released" {
+					state = scenario
+				}
+				if err := json.NewEncoder(w).Encode(admissionReceipt{Outcome: "verified", ConsumeURL: "/consume", Reservation: admissionReservation{RequestID: "call", State: state, ExpiresAt: 120, PolicyDigest: strings.Repeat("a", 64)}}); err != nil {
+					t.Error(err)
+				}
+			}))
+			defer server.Close()
+			client := Client{DecideEndpoint: server.URL, HTTP: server.Client(), Now: func() time.Time { return time.Unix(100, 0) }}
+			err := client.Authorize(t.Context(), "call", Link{Required: true, Protocol: Protocol, ProposalHash: strings.Repeat("a", 64), ReserveURL: "/reserve"})
+			expected, count := ErrConsumptionUncertain, uint32(1)
+			if scenario == "consumed" || scenario == "released" {
+				expected, count = ErrAttemptClosed, 0
+			}
+			if !errors.Is(err, expected) || consumes.Load() != count {
+				t.Fatal("admission lost its recovery state or retried", err, consumes.Load())
+			}
+		})
+	}
+}
 
 func TestAdmissionRequiresConfirmedUnexpiredConsumption(t *testing.T) {
 	for _, test := range []struct {

@@ -27,6 +27,12 @@ invocation. The new decision captures current policy and requires fresh
 approvals and admission. Linking decisions does not revoke the parent or copy
 its execution permission. The SDK does not automatically retry a consumed call.
 
+Low-level admission reports `admission.ErrAttemptClosed` for a bound consumed or
+canceled lease, and `admission.ErrConsumptionUncertain` when a consume reply
+cannot be confirmed. Both deny execution. Inspect the recorded attempt before
+starting another; a lost reply is not permission to repeat the tool. `Enforce`
+returns the corresponding recovery guidance without automatically retrying.
+
 The dependency-free `admission` package implements the same bounded protocol
 for host integrations. It rejects foreign links, redirects, stale or malformed
 receipts and lost consume replies. `operation_v1` receipts bind request identity,

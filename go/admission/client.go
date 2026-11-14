@@ -17,6 +17,8 @@ const Protocol = "operation_v1"
 const leaseLifetimeSeconds int64 = 30
 
 var ErrQuotaExhausted = errors.New("admission: tool-call allowance exhausted")
+var ErrAttemptClosed = errors.New("admission: attempt already consumed or canceled")
+var ErrConsumptionUncertain = errors.New("admission: consumption could not be confirmed")
 
 type Link struct {
 	Required     bool   `json:"required"`
@@ -86,18 +88,28 @@ func (c Client) Authorize(ctx context.Context, requestID string, link Link) erro
 	if reserved.Outcome == "quota_exhausted" {
 		return ErrQuotaExhausted
 	}
+	if reserved.Outcome == "verified" && !reserved.ExecutionAuthorized {
+		for _, state := range []string{"consumed", "released"} {
+			if c.validReceipt(reserved, requestID, state) {
+				return ErrAttemptClosed
+			}
+		}
+	}
 	if !c.validReceipt(reserved, requestID, "reserved") || reserved.ExecutionAuthorized || reserved.ConsumeURL == "" {
 		return errors.New("admission: reservation was not verified")
 	}
 	consumed, err := c.exchange(ctx, http.MethodPost, reserved.ConsumeURL, link.ProposalHash)
 	if err != nil {
-		return err
+		return fmt.Errorf("%w: %w", ErrConsumptionUncertain, err)
 	}
 	if !c.validReceipt(consumed, requestID, "consumed") || !consumed.ExecutionAuthorized || !sameAdmissionReservation(reserved, consumed) {
-		return errors.New("admission: execution was not authorized")
+		if c.validReceipt(consumed, requestID, "consumed") && !consumed.ExecutionAuthorized && sameAdmissionReservation(reserved, consumed) {
+			return ErrAttemptClosed
+		}
+		return ErrConsumptionUncertain
 	}
 	if ctx.Err() != nil {
-		return ctx.Err()
+		return fmt.Errorf("%w: %w", ErrConsumptionUncertain, ctx.Err())
 	}
 	return nil
 }
