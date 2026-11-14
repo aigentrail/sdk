@@ -117,6 +117,7 @@ type decideRequest struct {
 	AgentID           string         `json:"agent_id,omitempty"`
 	InvocationID      string         `json:"invocation_id,omitempty"`
 	RequestID         string         `json:"request_id,omitempty"`
+	ParentRequestID   string         `json:"parent_request_id,omitempty"`
 }
 
 // DecideOption binds registered tool identity and caller context to a proposal.
@@ -143,6 +144,12 @@ func WithInvocationID(id string) DecideOption {
 // retries.
 func WithRequestID(id string) DecideOption {
 	return func(r *decideRequest) { r.RequestID = id }
+}
+
+// WithParentRequestID links a fresh decision to the prior decision for the same
+// registered tool and invocation. Use a new request ID; approvals are not copied.
+func WithParentRequestID(id string) DecideOption {
+	return func(r *decideRequest) { r.ParentRequestID = id }
 }
 
 // ambientTraceID is the current OpenTelemetry trace id as 32-char hex, "" when

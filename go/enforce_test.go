@@ -44,6 +44,7 @@ func TestDecideSendsPayloadIdentityAndHeaders(t *testing.T) {
 		WithAgentID("agent-reporter"),
 		WithInvocationID("0af7651916cd43dd8448eb211c80319c"),
 		WithRequestID("tooluse_abc123"),
+		WithParentRequestID("previous-attempt"),
 		WithToolID("registered-run-sql"),
 	)
 
@@ -60,12 +61,13 @@ func TestDecideSendsPayloadIdentityAndHeaders(t *testing.T) {
 		t.Errorf("user-agent = %q", gotAgent)
 	}
 	want := map[string]any{
-		"event_type":    "tool_call",
-		"tool_name":     "run_sql",
-		"tool_id":       "registered-run-sql",
-		"agent_id":      "agent-reporter",
-		"invocation_id": "0af7651916cd43dd8448eb211c80319c",
-		"request_id":    "tooluse_abc123",
+		"event_type":        "tool_call",
+		"tool_name":         "run_sql",
+		"tool_id":           "registered-run-sql",
+		"agent_id":          "agent-reporter",
+		"invocation_id":     "0af7651916cd43dd8448eb211c80319c",
+		"request_id":        "tooluse_abc123",
+		"parent_request_id": "previous-attempt",
 	}
 	for k, wv := range want {
 		if gotBody[k] != wv {

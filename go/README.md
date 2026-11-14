@@ -21,6 +21,12 @@ Do not retry the tool because result reporting failed. A crash after consumption
 keeps the attempt charged. Low-level `Decide` and `AwaitGate` alone do not grant
 execution authority; use `Enforce` at the tool boundary.
 
+When changed policy requires re-evaluation, use a fresh `WithRequestID` and
+`WithParentRequestID(previousRequestID)` with the same registered tool and
+invocation. The new decision captures current policy and requires fresh
+approvals and admission. Linking decisions does not revoke the parent or copy
+its execution permission. The SDK does not automatically retry a consumed call.
+
 The dependency-free `admission` package implements the same bounded protocol
 for host integrations. It rejects foreign links, redirects, stale or malformed
 receipts and lost consume replies. `operation_v1` receipts bind request identity,
