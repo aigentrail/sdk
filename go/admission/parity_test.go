@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-func TestSharedAdmissionVectors(t *testing.T) {
+func TestLegacyQuotaVectorsAreRejected(t *testing.T) {
 	raw, err := os.ReadFile("../../spec/admission_vectors.json")
 	if err != nil {
 		t.Fatal(err)
@@ -42,7 +42,7 @@ func TestSharedAdmissionVectors(t *testing.T) {
 			defer server.Close()
 			client := Client{DecideEndpoint: server.URL + "/api/v1/decide", APIKey: "key", HTTP: server.Client(), Now: func() time.Time { return time.Unix(100, 0) }}
 			err := client.Authorize(context.Background(), "call", vector.Link)
-			if (err == nil) != vector.Allowed {
+			if err == nil {
 				t.Fatalf("allowed=%v want=%v error=%v", err == nil, vector.Allowed, err)
 			}
 		})

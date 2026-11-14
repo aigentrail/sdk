@@ -41,9 +41,7 @@ const (
 )
 
 // Identify the client on every request. Go's default "Go-http-client/1.1"
-// reads as a bot to edge WAFs (e.g. Cloudflare fronting the backend answers
-// 403), which would silently fail-open enforcement; a named agent is allowed
-// through.
+// reads as a bot to edge WAFs. A named agent avoids unnecessary edge refusals.
 const enforcerUserAgent = "gentrail-sdk-go"
 
 // Verdict is the backend's decision for a proposed tool call.
@@ -71,22 +69,15 @@ type Approval struct {
 // executes. A nil Enforcer allows every call, so the default behaviour stays
 // observe-only.
 type Enforcer struct {
-	strictAdmission bool
-	now             func() time.Time
-	base            string
-	apiKey          string
-	client          *http.Client
-	gateTimeout     time.Duration
-	pollInterval    time.Duration
+	now          func() time.Time
+	base         string
+	apiKey       string
+	client       *http.Client
+	gateTimeout  time.Duration
+	pollInterval time.Duration
 }
 
-type EnforcerOption func(*Enforcer)
-
-func WithStrictAdmission() EnforcerOption {
-	return func(e *Enforcer) { e.strictAdmission = true }
-}
-
-func NewEnforcer(endpoint, apiKey string, options ...EnforcerOption) *Enforcer {
+func NewEnforcer(endpoint, apiKey string) *Enforcer {
 	gateTimeout := defaultGateTimeout
 	if v := os.Getenv("GENTRAIL_GATE_TIMEOUT_SECONDS"); v != "" {
 		if secs, err := strconv.ParseFloat(v, 64); err == nil && secs > 0 {
@@ -100,9 +91,6 @@ func NewEnforcer(endpoint, apiKey string, options ...EnforcerOption) *Enforcer {
 		client:       &http.Client{Timeout: defaultDecideTimeout, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }},
 		gateTimeout:  gateTimeout,
 		pollInterval: defaultGatePollInterval,
-	}
-	for _, option := range options {
-		option(enforcer)
 	}
 	return enforcer
 }
@@ -122,15 +110,20 @@ type decideRequest struct {
 	AdmissionProtocol string         `json:"admission_protocol,omitempty"`
 	EventType         string         `json:"event_type"`
 	ToolName          string         `json:"tool_name"`
+	ToolID            string         `json:"tool_id"`
 	ToolArgs          map[string]any `json:"tool_args"`
 	AgentID           string         `json:"agent_id,omitempty"`
 	InvocationID      string         `json:"invocation_id,omitempty"`
 	RequestID         string         `json:"request_id,omitempty"`
 }
 
-// DecideOption attaches optional caller identity to a Decide request. A bare
-// call still gets a verdict, only unscoped and unjoinable.
+// DecideOption binds registered tool identity and caller context to a proposal.
 type DecideOption func(*decideRequest)
+
+// WithToolID binds the call to an operation registered in the policy registry.
+func WithToolID(id string) DecideOption {
+	return func(r *decideRequest) { r.ToolID = id }
+}
 
 // WithAgentID scopes agent-targeted and windowed rules to the caller.
 func WithAgentID(id string) DecideOption {
@@ -173,17 +166,13 @@ func (e *Enforcer) Decide(ctx context.Context, toolName string, toolArgs map[str
 	if e == nil {
 		return allow
 	}
-	if e.strictAdmission {
-		allow.Decision = DecisionBlock
-		allow.Message = "Gentrail could not verify this tool-call attempt; the call was not run."
-	}
+	allow.Decision = DecisionBlock
+	allow.Message = "Gentrail could not verify this tool-call attempt; the call was not run."
 	if toolArgs == nil {
 		toolArgs = map[string]any{}
 	}
 	payload := decideRequest{EventType: "tool_call", ToolName: toolName, ToolArgs: toolArgs}
-	if e.strictAdmission {
-		payload.AdmissionProtocol = admission.Protocol
-	}
+	payload.AdmissionProtocol = admission.Protocol
 	for _, opt := range opts {
 		opt(&payload)
 	}
@@ -209,7 +198,7 @@ func (e *Enforcer) Decide(ctx context.Context, toolName string, toolArgs map[str
 	}
 	verdict.validateObservationReference(payload)
 	verdict.requestID = payload.RequestID
-	if e.strictAdmission && verdict.Outcome != "verified" {
+	if verdict.Outcome != "verified" {
 		verdict.Decision = DecisionBlock
 	}
 	return verdict

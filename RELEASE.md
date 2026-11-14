@@ -1,5 +1,18 @@
 # SDK release preparation
 
+## Unreleased D3 migration
+
+Go enforcement now requires a registered tool ID (`WithToolID`) and uses
+`operation_v1` admission for every executable operation. Policy-bound execution
+leases replace quota-specific receipts. Missing admission, unavailable decisions
+and lost consumption replies deny execution. The `WithStrictAdmission` option
+is removed; configured enforcers always enforce this contract.
+
+The Python and JavaScript migrations and release-set updates remain pending.
+This branch is not a coordinated client release yet.
+
+## Previous release set
+
 This release adds decision-linked execution evidence and strict tool-call quota
 admission across all SDKs. Existing tracing and enforcement defaults remain
 unchanged. Strict admission requires explicit opt-in and an agent-bound key.

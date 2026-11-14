@@ -22,8 +22,8 @@ func TestAdmissionRequiresConfirmedUnexpiredConsumption(t *testing.T) {
 		{"replayed", func(r *admissionReceipt) { r.ExecutionAuthorized = false }, false},
 		{"expired", func(r *admissionReceipt) { r.Reservation.ExpiresAt = 100 }, false},
 		{"foreign request", func(r *admissionReceipt) { r.Reservation.RequestID = "other" }, false},
-		{"revision changed", func(r *admissionReceipt) { r.Reservation.RevisionID = "other" }, false},
-		{"window changed", func(r *admissionReceipt) { r.Reservation.WindowEnd++ }, false},
+		{"policy changed", func(r *admissionReceipt) { r.Reservation.PolicyDigest = strings.Repeat("b", 64) }, false},
+		{"deadline extended", func(r *admissionReceipt) { r.Reservation.ExpiresAt++ }, false},
 		{"unknown outcome", func(r *admissionReceipt) { r.Outcome = "unknown" }, false},
 		{"not consumed", func(r *admissionReceipt) { r.Reservation.State = "reserved" }, false},
 	} {
@@ -38,7 +38,7 @@ func TestAdmissionRequiresConfirmedUnexpiredConsumption(t *testing.T) {
 				if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body["proposal_hash"] != strings.Repeat("a", 64) {
 					t.Error("proposal binding lost")
 				}
-				receipt := admissionReceipt{Outcome: "verified", ConsumeURL: "/consume", Reservation: admissionReservation{RequestID: "call", State: "reserved", ExpiresAt: 120, WindowStart: 60, WindowEnd: 180, RevisionID: "revision"}}
+				receipt := admissionReceipt{Outcome: "verified", ConsumeURL: "/consume", Reservation: admissionReservation{RequestID: "call", State: "reserved", ExpiresAt: 120, PolicyDigest: strings.Repeat("a", 64)}}
 				if r.URL.Path == "/consume" {
 					receipt.Reservation.State = "consumed"
 					receipt.ExecutionAuthorized = true
@@ -105,7 +105,7 @@ func TestAdmissionLostConsumeReplyNeverRetriesOrGrantsExecution(t *testing.T) {
 			}
 			return
 		}
-		receipt := admissionReceipt{Outcome: "verified", ConsumeURL: "/consume", Reservation: admissionReservation{RequestID: "call", State: "reserved", ExpiresAt: 120, WindowStart: 60, WindowEnd: 180, RevisionID: "revision"}}
+		receipt := admissionReceipt{Outcome: "verified", ConsumeURL: "/consume", Reservation: admissionReservation{RequestID: "call", State: "reserved", ExpiresAt: 120, PolicyDigest: strings.Repeat("a", 64)}}
 		if err := json.NewEncoder(w).Encode(receipt); err != nil {
 			t.Error(err)
 		}

@@ -13,7 +13,8 @@ import (
 	"time"
 )
 
-const Protocol = "quota_v1"
+const Protocol = "operation_v1"
+const leaseLifetimeSeconds int64 = 30
 
 var ErrQuotaExhausted = errors.New("admission: tool-call allowance exhausted")
 
@@ -63,12 +64,10 @@ type admissionReceipt struct {
 }
 
 type admissionReservation struct {
-	RequestID   string `json:"request_id"`
-	State       string `json:"state"`
-	ExpiresAt   int64  `json:"expires_at"`
-	WindowStart int64  `json:"window_start"`
-	WindowEnd   int64  `json:"window_end"`
-	RevisionID  string `json:"revision_id"`
+	RequestID    string `json:"request_id"`
+	State        string `json:"state"`
+	ExpiresAt    int64  `json:"expires_at"`
+	PolicyDigest string `json:"policy_digest"`
 }
 
 func (c Client) Authorize(ctx context.Context, requestID string, link Link) error {
@@ -106,14 +105,18 @@ func (c Client) Authorize(ctx context.Context, requestID string, link Link) erro
 func (c Client) validReceipt(receipt admissionReceipt, requestID, state string) bool {
 	reservation := receipt.Reservation
 	now := c.Now().Unix()
+	digest, err := hex.DecodeString(reservation.PolicyDigest)
 	return receipt.Outcome == "verified" && reservation.RequestID == requestID && reservation.State == state &&
-		reservation.RevisionID != "" && reservation.WindowStart <= now && now < reservation.ExpiresAt &&
-		reservation.ExpiresAt <= reservation.WindowEnd
+		err == nil && len(digest) == 32 && now > 0 && now < reservation.ExpiresAt && reservation.ExpiresAt-now <= leaseLifetimeSeconds
 }
 
 func sameAdmissionReservation(reserved, consumed admissionReceipt) bool {
 	expected := reserved.Reservation
 	expected.State = "consumed"
+	if consumed.Reservation.ExpiresAt > expected.ExpiresAt {
+		return false
+	}
+	expected.ExpiresAt = consumed.Reservation.ExpiresAt
 	return consumed.Reservation == expected
 }
 
