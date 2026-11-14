@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"io"
 	"strings"
 
 	"go.opentelemetry.io/otel/attribute"
@@ -36,8 +37,14 @@ func observationArgumentsHash(raw string) (string, error) {
 	}
 	arguments := map[string]any{}
 	if raw != "" {
-		if err := json.Unmarshal([]byte(raw), &arguments); err != nil {
+		decoder := json.NewDecoder(strings.NewReader(raw))
+		decoder.UseNumber()
+		if err := decoder.Decode(&arguments); err != nil {
 			return "", errors.New("observation arguments must be a JSON object")
+		}
+		var extra any
+		if err := decoder.Decode(&extra); err != io.EOF {
+			return "", errors.New("observation arguments must contain one JSON object")
 		}
 	}
 	if arguments == nil {

@@ -2,6 +2,8 @@ package gentrail
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -9,6 +11,24 @@ import (
 	"strings"
 	"testing"
 )
+
+func TestObservationArgumentsRetainLargeIntegerValues(t *testing.T) {
+	first, err := observationArgumentsHash(`{"value":9007199254740993}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	expected := sha256.Sum256([]byte(`{"value":9007199254740993}`))
+	if first != hex.EncodeToString(expected[:]) {
+		t.Fatal("large integer was rounded before hashing")
+	}
+	second, err := observationArgumentsHash(`{"value":9007199254740992}`)
+	if err != nil || first == second {
+		t.Fatal("adjacent integer observation references collided", err)
+	}
+	if _, err := observationArgumentsHash(`{"value":1} {"value":2}`); err == nil {
+		t.Fatal("trailing JSON was accepted")
+	}
+}
 
 func TestObservationArgumentsMatchPortableVectors(t *testing.T) {
 	raw, err := os.ReadFile("../spec/observation_vectors.json")
