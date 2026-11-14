@@ -23,6 +23,8 @@ const (
 	DecisionAllow = "ALLOW"
 	DecisionBlock = "BLOCK"
 	DecisionGate  = "GATE"
+	DecisionWarn  = "WARN"
+	DecisionLog   = "LOG"
 )
 
 // Gate statuses AwaitGate resolves to. Anything but GateApproved means the
@@ -192,7 +194,7 @@ func (e *Enforcer) Decide(ctx context.Context, toolName string, toolArgs map[str
 		verdict.Outcome = "unavailable"
 	}
 	switch verdict.Decision {
-	case DecisionAllow, DecisionBlock, DecisionGate:
+	case DecisionAllow, DecisionBlock, DecisionGate, DecisionWarn, DecisionLog:
 	default:
 		verdict.Outcome = "unavailable"
 	}

@@ -15,8 +15,9 @@ import (
 )
 
 func TestStrictEnforcementApprovesThenConsumesOnlyOnce(t *testing.T) {
-	for _, gate := range []bool{false, true} {
-		fixture := &quotaEnforcerServer{t: t, gate: gate}
+	for _, decision := range []string{DecisionAllow, DecisionWarn, DecisionLog, DecisionGate} {
+		gate := decision == DecisionGate
+		fixture := &quotaEnforcerServer{t: t, gate: gate, decision: decision}
 		server := httptest.NewServer(http.HandlerFunc(fixture.serveHTTP))
 		e := NewEnforcer(server.URL, "key")
 		e.now = func() time.Time { return time.Unix(100, 0) }
@@ -60,6 +61,7 @@ type quotaEnforcerServer struct {
 	paths    []string
 	consumes int
 	gate     bool
+	decision string
 }
 
 func (fixture *quotaEnforcerServer) serveHTTP(w http.ResponseWriter, r *http.Request) {
@@ -75,7 +77,7 @@ func (fixture *quotaEnforcerServer) serveHTTP(w http.ResponseWriter, r *http.Req
 		if request.AdmissionProtocol != admission.Protocol || request.RequestID != "call" {
 			fixture.t.Error("missing admission capability or retry identity")
 		}
-		verdict := Verdict{Decision: DecisionAllow, Outcome: "verified", Admission: &admission.Link{Required: true, Protocol: admission.Protocol, ProposalHash: strings.Repeat("a", 64), ReserveURL: "/reserve"}}
+		verdict := Verdict{Decision: fixture.decision, Outcome: "verified", Admission: &admission.Link{Required: true, Protocol: admission.Protocol, ProposalHash: strings.Repeat("a", 64), ReserveURL: "/reserve"}}
 		if fixture.gate {
 			verdict.Decision = DecisionGate
 			verdict.Approval = &Approval{StatusURL: "/approval"}
