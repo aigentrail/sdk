@@ -9,8 +9,9 @@ and lost consumption replies deny execution. The `WithStrictAdmission` option
 is removed; configured enforcers always enforce this contract.
 
 Python and JavaScript admission transports now use the same policy-bound
-`operation_v1` leases and shared vectors. Their enforcement defaults and tool
-identity mapping still need migration; release-set updates also remain pending.
+`operation_v1` leases and shared vectors. JavaScript enforcement and `guardTools` now require registered tool identity
+and mandatory admission. Python enforcement defaults and tool identity mapping
+still need migration; release-set updates also remain pending.
 This branch is not a coordinated client release yet.
 
 ## Previous release set

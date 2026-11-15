@@ -24,13 +24,15 @@ Go covers context-aware enforcement and its shared host admission client.
 Framework availability is ecosystem-specific and is recorded in the root matrix.
 
 D3 operation admission is mandatory for configured enforcement and uses an
-agent-bound credential plus a registered tool identity. All three admission transports consume the operation vectors; Python also
-qualifies synchronous and asynchronous enforcement transport. JavaScript/Python
-mandatory enforcement defaults and registered tool mapping remain pending. The quota vectors
-retain the previous contract for those clients and are rejection cases in Go.
-They do not establish D3 parity. Policy
-reads do not grant execution authority. The server remains the sole owner of
-policy evaluation and quota state. Attempts remain charged after consumption,
+agent-bound credential plus a registered tool identity. All three admission
+transports consume the operation vectors; Python also qualifies synchronous and
+asynchronous enforcement transport. Go and JavaScript require admission for every
+executable verdict. Python's mandatory enforcement and registered tool mapping
+remain pending. Legacy vectors prove rejection in Go and JavaScript, not D3
+cross-language enforcement parity yet.
+
+Policy reads do not grant execution authority. The server remains the sole owner
+of policy evaluation and quota state. Attempts remain charged after consumption,
 including crashes, tool failures and later host refusals. Telemetry-only AWS
 integrations cannot claim tool-execution enforcement.
 

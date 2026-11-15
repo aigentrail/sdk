@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { PolicyEnforcer } from "./enforcement.js";
 
 export interface GuardOptions {
-  strictAdmission?: boolean;
+  toolIds?: Readonly<Record<string, string>>;
   endpoint?: string;
   apiKey?: string;
   agentId?: string;
@@ -50,9 +50,9 @@ function enforcerFromGuardOptions(
   ).trim();
   const apiKey = (options.apiKey ?? process.env.GENTRAIL_API_KEY ?? "").trim();
   if (endpoint === "" || apiKey === "") {
-    if (options.strictAdmission) {
+    if (endpoint !== "" || apiKey !== "") {
       throw new Error(
-        "Strict admission needs a decide endpoint and agent-bound API key",
+        "Guarded execution needs both a decide endpoint and API key",
       );
     }
     return null;
@@ -60,7 +60,6 @@ function enforcerFromGuardOptions(
   return new PolicyEnforcer({
     endpoint,
     apiKey,
-    strictAdmission: options.strictAdmission,
     decideTimeoutMs: options.decideTimeoutMs,
     gateTimeoutMs: options.gateTimeoutMs,
     gatePollIntervalMs: options.gatePollIntervalMs,
@@ -85,6 +84,13 @@ export function guardTools<T extends Record<string, object>>(
       guarded[name] = tool;
       continue;
     }
+    if (
+      !options.toolIds ||
+      !Object.hasOwn(options.toolIds, name) ||
+      !options.toolIds[name]?.trim()
+    ) {
+      throw new Error(`Guarded tool ${name} needs a registered tool ID`);
+    }
     guarded[name] = {
       ...tool,
       execute: guardedExecute(
@@ -106,6 +112,7 @@ function guardedExecute(
 ): ToolExecute {
   return (async (input: unknown, executeOptions?: ToolExecuteOptions) => {
     const outcome = await enforcer.enforce(toolName, input, {
+      toolId: options.toolIds?.[toolName],
       agentId: options.agentId,
       invocationId: options.invocationId,
       requestId: executeOptions?.toolCallId ?? randomUUID(),

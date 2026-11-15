@@ -17,35 +17,48 @@ npm 11).
 Available since 0.4.0. See [release preparation](../../RELEASE.md)
 for package verification and rollout.
 
-Use an agent-bound API key and opt into fail-closed enforcement:
+Use an agent-bound API key and a registered tool ID:
 
 ```typescript
 import { PolicyEnforcer, guardTools } from "@gentrail/ai";
 
-const enforcer = new PolicyEnforcer({ endpoint, apiKey: boundAgentKey, strictAdmission: true });
-const outcome = await enforcer.enforce("issue_refund", arguments, { requestId: toolCallId });
+const enforcer = new PolicyEnforcer({ endpoint, apiKey: boundAgentKey });
+const outcome = await enforcer.enforce("issue_refund", arguments, {
+  toolId: registeredRefundToolId,
+  requestId: toolCallId,
+});
 if (!outcome.allowed) throw new Error(outcome.message);
 const result = await issueRefund(arguments);
 
-const guarded = guardTools(tools, { endpoint, apiKey: boundAgentKey, strictAdmission: true });
+const guarded = guardTools(tools, {
+  endpoint,
+  apiKey: boundAgentKey,
+  toolIds: { issue_refund: registeredRefundToolId },
+});
 ```
 
-`PolicyEnforcer.fromEnv({ strictAdmission: true })` uses the existing endpoint
-and key variables. Missing configuration in explicit strict setup raises an
-error. `guardTools` carries strict enforcement into the Vercel AI tool boundary.
+Configured enforcement always fails closed and requires `operation_v1` admission,
+including operations without a quota. `guardTools` requires an explicit mapping
+for each executable tool. With neither endpoint nor key configured it leaves
+observe-only tools untouched; partial guard configuration throws an error.
+`PolicyEnforcer.fromEnv()` uses the existing endpoint and key variables; supply
+`toolId` on each `decide` or `enforce` call.
 
-Enforcement resolves approval, then reserves and consumes capacity once before
-returning permission to run. Outages, unknown outcomes, expired or malformed
-receipts, foreign controls, redirects and lost consume replies block execution.
-A repeated request ID cannot reuse consumed authority. A crash, tool failure or
-later host refusal leaves the consumed attempt charged. Never retry execution
-because evidence reporting failed.
+Enforcement resolves every required approval, then reserves and consumes one
+policy-bound lease before returning permission to run. Outages, missing admission,
+unknown outcomes, expired or malformed receipts, foreign controls, redirects and
+lost consume replies block execution. Low-level `decide` and `awaitGate` do not
+grant execution authority.
 
-Low-level `decide` and `awaitGate` do not grant quota execution authority.
-Admission has a nine-second total budget, at most three seconds per request and
-64 KiB receipts; consume is never retried. Non-quota decisions add no reservation
-requests. Without strict opt-in, decision outages retain their existing
-fail-open behavior; receiving an admission resource still requires strict support.
+A repeated request ID cannot reuse consumed authority. Closed and uncertain
+attempts return different recovery guidance. Do not retry automatically after a
+lost consume reply or failed evidence report: check the attempt's outcome first.
+A crash or tool failure after consumption does not restore permission. To request
+a fresh evaluation, use a new `requestId` and set `parentRequestId` to the earlier
+request; the new decision does not inherit approvals.
+
+Admission has a nine-second total budget, at most three seconds per request,
+a 30-second lease limit and 64 KiB receipts. Consume is never retried.
 
 ## Quickstart
 
@@ -300,8 +313,7 @@ npm test
 ### Linking tool results to decisions
 
 `PolicyEnforcer.decide()` returns `outcome` as `verified`, `request_conflict`, or
-`unavailable`. Transport errors retain fail-open permission with an explicit
-unavailable outcome. `enforce()` also returns the original verdict in `verdict`.
+`unavailable`. Transport errors return `BLOCK` with an explicit unavailable outcome. `enforce()` also returns the original verdict in `verdict`.
 
 A verified, attributed verdict can carry `observation_reference` and a
 server-provided `observations_url`. Pass the reference as `decisionReference`

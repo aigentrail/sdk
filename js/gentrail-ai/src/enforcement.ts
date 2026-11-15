@@ -3,6 +3,8 @@ import {
   ADMISSION_PROTOCOL,
   AdmissionClient,
   QuotaExhaustedError,
+  AttemptClosedError,
+  ConsumptionUncertainError,
   boundedJson,
   sameOriginLink,
 } from "./admission.js";
@@ -33,7 +35,6 @@ export interface Verdict {
 export interface PolicyEnforcerOptions {
   endpoint: string;
   apiKey: string;
-  strictAdmission?: boolean;
   now?: () => number;
   idGen?: () => string;
   decideTimeoutMs?: number;
@@ -42,6 +43,8 @@ export interface PolicyEnforcerOptions {
 }
 
 export interface DecideOptions {
+  toolId?: string;
+  parentRequestId?: string;
   agentId?: string;
   invocationId?: string;
   requestId?: string;
@@ -62,7 +65,6 @@ const GATE_POLL_INTERVAL_MS_DEFAULT = 2000;
 const INVALID_TRACE_ID = "00000000000000000000000000000000";
 
 export class PolicyEnforcer {
-  readonly strictAdmission: boolean;
   private readonly admission: AdmissionClient;
   private readonly requestIds = new WeakMap<Verdict, string>();
   private readonly idGen: () => string;
@@ -81,7 +83,6 @@ export class PolicyEnforcer {
     if (apiKey === "") {
       throw new Error("PolicyEnforcer needs an API key");
     }
-    this.strictAdmission = options.strictAdmission === true;
     this.idGen = options.idGen ?? randomUUID;
     this.admission = new AdmissionClient(
       endpoint + "/api/v1/decide",
@@ -102,20 +103,13 @@ export class PolicyEnforcer {
     );
   }
 
-  static fromEnv(
-    options: { strictAdmission?: boolean } = {},
-  ): PolicyEnforcer | null {
+  static fromEnv(): PolicyEnforcer | null {
     const endpoint = (process.env.GENTRAIL_DECIDE_ENDPOINT ?? "").trim();
     const apiKey = (process.env.GENTRAIL_API_KEY ?? "").trim();
     if (endpoint === "" || apiKey === "") {
-      if (options.strictAdmission) {
-        throw new Error(
-          "Strict admission needs a decide endpoint and agent-bound API key",
-        );
-      }
       return null;
     }
-    return new PolicyEnforcer({ endpoint, apiKey, ...options });
+    return new PolicyEnforcer({ endpoint, apiKey });
   }
 
   async decide(
@@ -123,14 +117,23 @@ export class PolicyEnforcer {
     toolArgs: unknown,
     options: DecideOptions = {},
   ): Promise<Verdict> {
+    if (!options.toolId?.trim()) {
+      return {
+        decision: "BLOCK",
+        outcome: "unavailable",
+        message: "Gentrail needs a registered tool ID; the call was not run.",
+      };
+    }
     const payload: Record<string, unknown> = {
+      tool_id: options.toolId,
+      admission_protocol: ADMISSION_PROTOCOL,
       event_type: "tool_call",
       tool_name: toolName,
       tool_args: toolArgs ?? {},
       request_id: options.requestId || this.idGen(),
     };
-    if (this.strictAdmission) {
-      payload.admission_protocol = ADMISSION_PROTOCOL;
+    if (options.parentRequestId) {
+      payload.parent_request_id = options.parentRequestId;
     }
     if (options.agentId) {
       payload.agent_id = options.agentId;
@@ -142,7 +145,7 @@ export class PolicyEnforcer {
     try {
       const verdict = await this.postDecide(payload);
       this.requestIds.set(verdict, String(payload.request_id));
-      if (this.strictAdmission && verdict.outcome !== "verified") {
+      if (verdict.outcome !== "verified") {
         verdict.decision = "BLOCK";
       }
       return verdict;
@@ -151,7 +154,7 @@ export class PolicyEnforcer {
         `gentrail decide failed (${String(err)}) for tool ${toolName}`,
       );
       return {
-        decision: this.strictAdmission ? "BLOCK" : "ALLOW",
+        decision: "BLOCK",
         outcome: "unavailable",
       };
     }
@@ -218,38 +221,35 @@ export class PolicyEnforcer {
         };
       }
     }
-    if (Object.hasOwn(verdict, "admission")) {
-      try {
-        if (!this.strictAdmission) {
-          throw new Error(
-            "Strict tool-call quotas require strictAdmission and an agent-bound credential.",
-          );
-        }
-        await this.admission.authorize(
-          this.requestIds.get(verdict) ?? "",
-          verdict.admission,
-        );
-      } catch (error) {
-        if (error instanceof QuotaExhaustedError) {
-          return {
-            verdict,
-            allowed: false,
-            message:
-              "This agent has used its tool-call allowance for the current quota window.",
-            decision,
-            rule,
-          };
-        }
-        console.warn(`gentrail admission failed (${String(error)})`);
-        return {
-          verdict,
-          allowed: false,
-          message:
-            "Gentrail could not authorize this tool-call attempt; the call was not run.",
-          decision,
-          rule,
-        };
+    if (!Object.hasOwn(verdict, "admission")) {
+      return {
+        verdict,
+        allowed: false,
+        message:
+          "Gentrail did not provide execution admission; the call was not run.",
+        decision,
+        rule,
+      };
+    }
+    try {
+      await this.admission.authorize(
+        this.requestIds.get(verdict) ?? "",
+        verdict.admission,
+      );
+    } catch (error) {
+      let message =
+        "Gentrail could not authorize this tool-call attempt. Review its status before starting another.";
+      if (error instanceof QuotaExhaustedError) {
+        message =
+          "This agent has used its tool-call allowance for the current quota window.";
+      } else if (error instanceof AttemptClosedError) {
+        message =
+          "This tool-call attempt is already consumed or canceled. Check its outcome before starting a new attempt.";
+      } else if (error instanceof ConsumptionUncertainError) {
+        message =
+          "Gentrail could not confirm execution admission. Do not retry automatically; check this attempt's outcome before starting another.";
       }
+      return { verdict, allowed: false, message, decision, rule };
     }
     return { verdict, allowed: true, message: "", decision, rule };
   }

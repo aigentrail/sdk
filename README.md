@@ -23,8 +23,7 @@ are native to each ecosystem; the table records current implementation support.
 | Redaction of GenAI attributes on spans other libraries emit | `instrument()` | `Instrument()` | `instrument()` |
 | Inline policy and approval checks | `PolicyEnforcer` | `Enforcer` | `PolicyEnforcer` |
 | One decide-and-gate cycle | `enforce()` | `Enforcer.Enforce` | `PolicyEnforcer.enforce` |
-| Legacy quota admission, explicit opt-in | `strict_admission=True` (sync and async) | Removed; use operation admission | `strictAdmission: true` |
-| `operation_v1` execution admission | Migration pending | Mandatory for configured enforcers | Migration pending |
+| `operation_v1` execution admission | Transport migrated; mandatory enforcement pending | Mandatory for configured enforcers | Mandatory; `toolId` or `guardTools` mapping |
 | Evidence ledger with sealed, hash-verified decision journals | `EvidenceLedger` | `EvidenceLedger` | `EvidenceLedger` |
 | HTTP model-call instrumentation | `tracer.httpx_transport()` | `Tracer.HTTPRoundTripper` | `tracer.fetch()` |
 | Framework adapters | Strands, LangChain, OpenAI Agents | none | Vercel AI SDK (`guardTools`) |
