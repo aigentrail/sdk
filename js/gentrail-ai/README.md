@@ -112,25 +112,26 @@ import { guardTools } from "@gentrail/ai";
 
 const result = streamText({
   model,
-  tools: guardTools(tools, { agentId: "billing-agent" }),
+  tools: guardTools(tools, { agentId: "billing-agent", toolIds: registeredToolIds }),
   prompt: "Reconcile the Q3 invoices",
 });
 ```
 
-- `ALLOW` runs the tool unchanged.
+- Verified `ALLOW` runs the authorized input snapshot after admission.
 - `BLOCK` throws a `GentrailPolicyError` carrying the policy message; the AI
   SDK turns errors thrown inside `execute` into `tool-error` parts, so the
   model sees the message and the run continues.
 - `GATE` polls the approval status until a human decides in the Gentrail
   dashboard. Approved runs the tool; denied, expired, or unanswered throws like
   `BLOCK`. The gate fails closed.
-- A decide transport error fails open: the tool runs and enforcement is
-  skipped for that call.
+- A decide transport error blocks execution. An ALLOW or approved gate without
+  admission cannot run a tool.
 
 ```ts
 guardTools(tools, {
   endpoint,            // default GENTRAIL_DECIDE_ENDPOINT
   apiKey,              // default GENTRAIL_API_KEY
+  toolIds,             // registered ID for each executable tool name
   agentId,             // scopes agent-targeted and windowed rules
   invocationId,        // joins the enforcement record to your trace
   decideTimeoutMs,     // default 3000
@@ -155,6 +156,7 @@ const outcome = await enforcer?.enforce(
   "wire_money",
   { amount: 5000 },
   {
+    toolId: registeredWireToolId,
     agentId: "treasury-agent",
     requestId: toolCallId, // synthesized when absent
   },
@@ -164,8 +166,9 @@ if (outcome && !outcome.allowed) {
 }
 ```
 
-`decide()` fails open to `ALLOW`, `awaitGate()` fails closed to `"timeout"`,
-and `invocation_id` defaults to the active OpenTelemetry trace id.
+`decide()` fails closed to `BLOCK` on backend errors; `awaitGate()` returns
+`"timeout"` on failure. Neither grants execution authority alone. `invocation_id`
+defaults to the active OpenTelemetry trace ID.
 
 ## Governance tracing
 

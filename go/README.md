@@ -149,12 +149,11 @@ if !allowed {
 }
 ```
 
-`Enforce` runs one decide-and-gate cycle. `BLOCK` returns `false` with the
-verdict message (or `"<decision> by policy <rule>"`). `GATE` waits up to the
-gate timeout (`GENTRAIL_GATE_TIMEOUT_SECONDS`, default 120) for a human
-approval: approved returns `true`; denied, expired, or unanswered returns
-`false` with `"<message> (approval <status>)"`. Anything else is allowed.
-`Decide` fails open on backend errors; `AwaitGate` fails closed.
+`Enforce` evaluates the proposal, waits for required approvals and consumes
+single-use admission before returning `true`. BLOCK, missing or unverified
+verdicts, unresolved gates and admission failures return `false`. `Decide` and
+`AwaitGate` alone never grant execution authority; backend failures keep the
+call blocked. Run the tool with the exact arguments passed to enforcement.
 
 Set `ToolCallParams.EnforcedDecision` to the verdict (`DecisionBlock` or
 `DecisionGate`) when recording a cancelled tool call; it is exported as
