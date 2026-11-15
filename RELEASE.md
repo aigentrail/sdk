@@ -1,19 +1,30 @@
 # SDK release preparation
 
-## Unreleased D3 migration
+## D3 candidate release set
 
-Go enforcement now requires a registered tool ID (`WithToolID`) and uses
-`operation_v1` admission for every executable operation. Policy-bound execution
-leases replace quota-specific receipts. Missing admission, unavailable decisions
-and lost consumption replies deny execution. The `WithStrictAdmission` option
-is removed; configured enforcers always enforce this contract.
+| Package | Version | Release tag |
+| --- | --- | --- |
+| Python `gentrail` | 0.9.0 | `v0.9.0` |
+| JavaScript `@gentrail/ai` | 0.5.0 | `js-v0.5.0` |
+| Go `github.com/aigentrail/sdk/go` | 0.7.0 | `go/v0.7.0` |
 
-Python and JavaScript use the same policy-bound `operation_v1` leases and shared
-vectors. Their configured enforcers require registered tool identity and mandatory
-admission, including framework adapters. Python supports sync and async callers;
-JavaScript provides `guardTools` mappings. The old strict-admission opt-in options
-are removed. Release-set updates, application conformance and publication remain
-pending. This branch is not a coordinated client release yet.
+This is a breaking enforcement change. Configured enforcers require registered
+identity and policy-bound `operation_v1` admission for every executable operation,
+including those without quotas. Remove the old strict-admission options. Pass
+Go `WithToolID`, JavaScript `toolId`/`guardTools` mappings or Python `tool_id`/
+`tool_ids`. Python framework adapters retain mappings across sync/async conversion.
+
+Missing admission, unavailable decisions and lost consumption replies deny
+execution. Closed attempts and uncertain consumption have distinct recovery
+states; neither permits automatic retry. Parent-request options link a fresh
+attempt without inheriting approvals. Shared vectors and package checks cover
+all three languages.
+
+A D3-compatible server is required. Updating the SDK alone against an old server
+keeps execution blocked. Coordinate server/client deployment and pending-work
+handling; never replace an existing tag or package. Candidate metadata and local
+package checks do not mean these versions are published. Application pin updates,
+public registry/proxy verification and coordinated dev cutover remain pending.
 
 ## Previous release set
 
@@ -36,7 +47,7 @@ same runtime behavior. The npm trust connection permits `publish-npm.yml` in
 `aigentrail/sdk` using the `npm` environment. Its first successful CI publish
 must complete within two days of configuration to activate the connection.
 
-## Behavior
+## Previous release behavior
 
 - Opt in with Python `strict_admission=True`, Go `WithStrictAdmission()`, or
   JavaScript `strictAdmission: true`. Python supports sync and async clients.
@@ -73,7 +84,7 @@ pack and install the npm tarball, and download a candidate Go module zip through
 a temporary file-based module proxy. Existing native suites and shared vectors
 then run against packaged code, with test fixtures supplied separately. Import
 checks exercise public Python and JavaScript exports, bundled PII data and
-explicit strict-mode defaults. JavaScript packing always rebuilds generated code.
+enforcement defaults. JavaScript packing always rebuilds generated code.
 
 Artifacts are saved under `dist/release/`. The release workflow runs these checks
 on pull requests, main and release tags. Tag-triggered publishing consumes the
@@ -88,11 +99,10 @@ they do not certify hosted providers or live AWS latency.
 
 ## Rollout
 
-After this PR merges and its checks pass, create only `js-v0.4.1` on the merged
-commit. The existing `v0.8.0` and `go/v0.6.0` tags remain on their original release
-commit. Verify the npm publish job and install 0.4.1 from the public registry.
-Then update Gentrail's Go dependency and cross-language conformance pin together;
-version and pin verification must support the Go release tag rather than assuming
-every dependency uses a pseudoversion.
-
-This release PR prepares JavaScript 0.4.1; publication follows merge.
+After all candidate checks pass, merge the SDK candidate and publish only the
+three tags in the D3 table on that exact commit. Existing tags remain immutable.
+Python/npm tag workflows publish the verified artifacts; Go uses its module tag.
+Verify every public package/module before updating application pins and locks.
+Run the application pipeline against those installed published versions, then
+perform the coordinated stopped-writer dev cutover. No older client may remain
+an active enforcement path.
