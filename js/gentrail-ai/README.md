@@ -39,7 +39,10 @@ const guarded = guardTools(tools, {
 
 Configured enforcement always fails closed and requires `operation_v1` admission,
 including operations without a quota. `guardTools` requires an explicit mapping
-for each executable tool. With neither endpoint nor key configured it leaves
+for each executable tool. It snapshots input before authorization and executes
+that snapshot, so caller mutations during approval/admission cannot change the
+authorized parameters. Non-cloneable inputs fail before execution. With neither
+endpoint nor key configured it leaves
 observe-only tools untouched; partial guard configuration throws an error.
 `PolicyEnforcer.fromEnv()` uses the existing endpoint and key variables; supply
 `toolId` on each `decide` or `enforce` call.

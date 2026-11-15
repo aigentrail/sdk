@@ -111,7 +111,8 @@ function guardedExecute(
   options: GuardOptions,
 ): ToolExecute {
   return (async (input: unknown, executeOptions?: ToolExecuteOptions) => {
-    const outcome = await enforcer.enforce(toolName, input, {
+    const inputSnapshot = structuredClone(input);
+    const outcome = await enforcer.enforce(toolName, inputSnapshot, {
       toolId: options.toolIds?.[toolName],
       agentId: options.agentId,
       invocationId: options.invocationId,
@@ -124,6 +125,6 @@ function guardedExecute(
         outcome.rule,
       );
     }
-    return execute(input, executeOptions);
+    return execute(inputSnapshot, executeOptions);
   }) as ToolExecute;
 }

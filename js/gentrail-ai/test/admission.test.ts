@@ -30,6 +30,7 @@ async function quotaServer(
     verdict?: unknown;
     liveTime?: boolean;
     slow?: boolean;
+    beforeConsume?: () => void;
   } = {},
 ) {
   const vector = structuredClone(options.vector ?? vectors[0]);
@@ -81,6 +82,7 @@ async function quotaServer(
         } else {
           assert.equal(path, "/consume");
           consumes++;
+          options.beforeConsume?.();
           if (options.lost) {
             req.socket.destroy();
             return;
@@ -398,5 +400,42 @@ test("closed and uncertain attempts have distinct recovery errors without retry"
     } finally {
       await srv.close();
     }
+  }
+});
+
+test("guardTools executes the authorized snapshot when caller input changes during admission", async () => {
+  const input = { file_path: "README.md" };
+  const srv = await quotaServer({
+    liveTime: true,
+    beforeConsume: () => {
+      input.file_path = "private.env";
+    },
+  });
+  let executedPath = "";
+  try {
+    const tools = guardTools(
+      {
+        Read: {
+          async execute(
+            actual: typeof input,
+            _options: { toolCallId: string },
+          ) {
+            executedPath = actual.file_path;
+          },
+        },
+      },
+      {
+        endpoint: srv.endpoint,
+        apiKey: "key",
+        toolIds: { Read: "registered-read" },
+      },
+    );
+    await tools.Read.execute(input, { toolCallId: "call" });
+    assert.equal(input.file_path, "private.env");
+    assert.deepEqual(srv.calls[0].body.tool_args, { file_path: "README.md" });
+    assert.equal(executedPath, "README.md");
+    assert.equal(srv.consumes, 1);
+  } finally {
+    await srv.close();
   }
 });
