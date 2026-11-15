@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import logging
 import time
+from copy import deepcopy
 from dataclasses import dataclass
 from collections.abc import Callable
 from typing import Any
@@ -215,7 +216,8 @@ class GentrailGovernanceHook(HookProvider):
         # the tool only if a human approves -- a denied, expired, or unanswered
         # gate keeps it cancelled (fails closed).
         if self._enforcer is not None:
-            tool_args = event.tool_use.get("input", {}) or {}
+            tool_args = deepcopy(event.tool_use.get("input", {}) or {})
+            event.tool_use["input"] = tool_args
             agent_id = event.agent.agent_id
             invocation_id = self._invocation_trace_id() or (
                 self._current_journal.journal_id if self._current_journal else ""

@@ -83,12 +83,14 @@ class PolicyEnforcer:
         )
 
     @classmethod
-    def from_env(cls) -> "PolicyEnforcer | None":
+    def from_env(
+        cls, *, tool_ids: dict[str, str] | None = None
+    ) -> "PolicyEnforcer | None":
         endpoint = os.environ.get("GENTRAIL_DECIDE_ENDPOINT", "").strip()
         api_key = os.environ.get("GENTRAIL_API_KEY", "").strip()
         if not endpoint or not api_key:
             return None
-        return cls(endpoint, api_key)
+        return cls(endpoint, api_key, tool_ids=tool_ids)
 
     def decide(
         self,
@@ -268,8 +270,10 @@ class AsyncPolicyEnforcer:
         return await asyncio.to_thread(self._sync.authorize_admission, verdict)
 
     @classmethod
-    def from_env(cls) -> "AsyncPolicyEnforcer | None":
-        sync = PolicyEnforcer.from_env()
+    def from_env(
+        cls, *, tool_ids: dict[str, str] | None = None
+    ) -> "AsyncPolicyEnforcer | None":
+        sync = PolicyEnforcer.from_env(tool_ids=tool_ids)
         if sync is None:
             return None
         return cls.from_sync(sync)

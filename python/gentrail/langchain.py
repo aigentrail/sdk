@@ -10,7 +10,7 @@ agent makes:
     agent = create_agent(
         model=model,
         tools=tools,
-        middleware=[enforcement_middleware(agent_id="reporter")],
+        middleware=[enforcement_middleware(enforcer, agent_id="reporter")],
     )
 
 BLOCK short-circuits the handler and returns a ToolMessage with
@@ -36,6 +36,8 @@ so only callers that build the middleware need the langchain install.
 
 from __future__ import annotations
 
+from copy import deepcopy
+from dataclasses import replace
 from typing import TYPE_CHECKING, Any, Callable
 
 from .enforcement import (
@@ -62,6 +64,7 @@ def _wrap_tool_call(
     agent_id: str,
     cancel: Callable[[str, dict], Any],
 ) -> Any:
+    request = replace(request, tool_call=deepcopy(request.tool_call))
     tool_call = request.tool_call
     allowed, message = enforce(
         enforcer,
@@ -83,6 +86,7 @@ async def _awrap_tool_call(
     agent_id: str,
     cancel: Callable[[str, dict], Any],
 ) -> Any:
+    request = replace(request, tool_call=deepcopy(request.tool_call))
     tool_call = request.tool_call
     allowed, message = await enforce_async(
         enforcer,
@@ -104,7 +108,8 @@ def enforcement_middleware(
     enforcer is a PolicyEnforcer or AsyncPolicyEnforcer; None builds one from
     the environment and raises when enforcement is not configured, since
     silently attaching a no-op middleware would look protected without being
-    so. agent_id scopes agent-targeted and windowed rules to this agent."""
+    so. Configure registered tool IDs on the enforcer. agent_id scopes
+    agent-targeted and windowed rules to this agent."""
     if enforcer is None:
         enforcer = PolicyEnforcer.from_env()
     if enforcer is None:

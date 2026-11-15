@@ -23,7 +23,14 @@ VECTORS = json.loads((ROOT / "spec/operation_admission_vectors.json").read_text(
 
 @contextmanager
 def server(
-    vector, *, gate=None, lost=False, redirect=False, slow=False, verdict_override=None
+    vector,
+    *,
+    gate=None,
+    lost=False,
+    redirect=False,
+    slow=False,
+    verdict_override=None,
+    before_consume=None,
 ):
     calls = []
     consumes = []
@@ -49,6 +56,8 @@ def server(
                 response = vector["reserved"]
             elif self.path == "/consume":
                 consumes.append(body)
+                if before_consume is not None:
+                    before_consume()
                 assert body == {"proposal_hash": vector["link"]["proposal_hash"]}
                 if lost:
                     self.connection.shutdown(socket.SHUT_RDWR)

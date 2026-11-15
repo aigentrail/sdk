@@ -35,7 +35,9 @@ class Gentrail:
         per-invocation state. Requires the strands extra."""
         from .hooks import GentrailGovernanceHook
 
-        return GentrailGovernanceHook(ledger=self.ledger, otel_tracer=self.tracer, enforcer=self.enforcer)
+        return GentrailGovernanceHook(
+            ledger=self.ledger, otel_tracer=self.tracer, enforcer=self.enforcer
+        )
 
     def flush(self) -> None:
         if self.tracer:
@@ -46,7 +48,7 @@ class Gentrail:
             self.tracer.shutdown()
 
 
-def init() -> Gentrail:
+def init(*, tool_ids: dict[str, str] | None = None) -> Gentrail:
     """Configure the SDK from the environment.
 
     Tracing needs GENTRAIL_API_KEY (endpoint override via
@@ -54,4 +56,7 @@ def init() -> Gentrail:
     GENTRAIL_DECIDE_ENDPOINT. Whatever is unset stays off: the returned handle
     always works, degrading to local capture only.
     """
-    return Gentrail(tracer=get_governance_tracer(), enforcer=PolicyEnforcer.from_env())
+    return Gentrail(
+        tracer=get_governance_tracer(),
+        enforcer=PolicyEnforcer.from_env(tool_ids=tool_ids),
+    )

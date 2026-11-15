@@ -9,12 +9,15 @@ shared OTel context. Runnable as `python tests/test_init.py` or via pytest.
 import os
 import sys
 import types
+from unittest.mock import patch
 
 try:
     from opentelemetry import trace as trace_api
     from opentelemetry.sdk.trace import TracerProvider
     from opentelemetry.sdk.trace.export import SimpleSpanProcessor
-    from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+    from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
+        InMemorySpanExporter,
+    )
     from opentelemetry.util._once import Once
 except ImportError:  # without the project deps: skip, not fail
     import unittest
@@ -31,6 +34,7 @@ if "gentrail" not in sys.modules:
     _pkg.__path__ = [_PKG_DIR]
     sys.modules["gentrail"] = _pkg
 from gentrail import otel_exporter as _mod  # noqa: E402
+
 assert _mod._try_import_otel(), "OTel packages must be installed for this test"
 
 _ENV_KEYS = (
@@ -86,17 +90,25 @@ def test_app_spans_never_reach_gentrail_and_governance_spans_join_the_app_trace(
     _mod._build_otlp_exporter = lambda api_key: gentrail_memory
     _mod._batch_processor_mod.BatchSpanProcessor = SimpleSpanProcessor
     try:
-        with _env(GENTRAIL_API_KEY="k", OTEL_EXPORTER_OTLP_ENDPOINT=UNREACHABLE_COLLECTOR):
+        with _env(
+            GENTRAIL_API_KEY="k", OTEL_EXPORTER_OTLP_ENDPOINT=UNREACHABLE_COLLECTOR
+        ):
             gt = _mod.create_governance_tracer()
     finally:
         _mod._build_otlp_exporter = original_build
         _mod._batch_processor_mod.BatchSpanProcessor = original_batch
     assert trace_api.get_tracer_provider() is app_provider
 
-    with app_provider.get_tracer("app").start_as_current_span("app.db_query") as app_span:
-        app_span.set_attribute("db.statement", "SELECT * FROM users WHERE email='jane.doe@example.com'")
+    with app_provider.get_tracer("app").start_as_current_span(
+        "app.db_query"
+    ) as app_span:
+        app_span.set_attribute(
+            "db.statement", "SELECT * FROM users WHERE email='jane.doe@example.com'"
+        )
         invocation = gt.start_invocation("ag1", "agent", "j1", "hi")
-        gt.end_invocation(invocation, response="ok", total_tokens=0, tool_count=0, integrity_hash="")
+        gt.end_invocation(
+            invocation, response="ok", total_tokens=0, tool_count=0, integrity_hash=""
+        )
 
     sent_to_gentrail = gentrail_memory.get_finished_spans()
     assert [s.name for s in sent_to_gentrail] == ["governance.invocation"]
@@ -161,7 +173,32 @@ def test_init_hook_needs_strands():
                 pass
 
 
+def test_init_preserves_registered_tool_mapping_on_the_wire():
+    init_mod = _load_init_module()
+    from test_admission import VECTORS, server
+
+    with (
+        server(VECTORS[0]) as (endpoint, calls, consumes),
+        patch.object(init_mod, "get_governance_tracer", return_value=None),
+    ):
+        with _env(
+            GENTRAIL_DECIDE_ENDPOINT=endpoint,
+            GENTRAIL_API_KEY="key",
+            OTEL_EXPORTER_OTLP_ENDPOINT=UNREACHABLE_COLLECTOR,
+        ):
+            handle = init_mod.init(tool_ids={"Read": "registered-read"})
+            try:
+                assert handle.enforcer is not None
+                handle.enforcer.decide("Read", {}, request_id="call")
+                assert calls[0][1]["tool_id"] == "registered-read"
+                assert calls[0][1]["admission_protocol"] == "operation_v1"
+                assert not consumes
+            finally:
+                handle.shutdown()
+
+
 if __name__ == "__main__":
+    test_init_preserves_registered_tool_mapping_on_the_wire()
     test_governance_tracer_never_installs_a_global_provider()
     test_app_spans_never_reach_gentrail_and_governance_spans_join_the_app_trace()
     test_auth_headers_default_to_bearer_and_yield_to_otel_env()

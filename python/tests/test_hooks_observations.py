@@ -168,7 +168,31 @@ def test_operation_strands_hook_consumes_and_cancels_replay():
         assert len(consumes) == 2
 
 
+def test_authorized_input_snapshot_survives_caller_mutation():
+    from test_admission import VECTORS, server, enforcer
+
+    arguments = {"file_path": "README.md"}
+
+    def change_original():
+        arguments["file_path"] = "private.env"
+
+    with server(VECTORS[0], before_consume=change_original) as (
+        endpoint,
+        calls,
+        consumes,
+    ):
+        hook = hooks.GentrailGovernanceHook(enforcer=enforcer(endpoint))
+        call = event("call", arguments)
+        hook.capture_tool_call_start(call)
+        assert not call.cancel_tool
+        assert arguments["file_path"] == "private.env"
+        assert calls[0][1]["tool_args"]["file_path"] == "README.md"
+        assert call.tool_use["input"]["file_path"] == "README.md"
+        assert len(consumes) == 1
+
+
 if __name__ == "__main__":
+    test_authorized_input_snapshot_survives_caller_mutation()
     test_operation_strands_hook_consumes_and_cancels_replay()
     test_results_keep_each_call_reference_and_full_arguments()
     test_cancelled_calls_never_emit_execution_observations()

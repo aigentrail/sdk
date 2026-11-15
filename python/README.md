@@ -69,7 +69,7 @@ export GENTRAIL_API_KEY="sk-..."
 import gentrail
 from strands import Agent
 
-g = gentrail.init()
+g = gentrail.init(tool_ids=registered_tool_ids)
 agent = Agent(model=model, tools=tools, hooks=[g.hook()])
 agent("Reconcile the Q3 invoices")
 ```
@@ -90,8 +90,11 @@ pip install "gentrail[openai-agents]"
 ```python
 from agents import function_tool
 from gentrail.openai_agents import enforcement_guardrail
+from gentrail.enforcement import PolicyEnforcer
 
-@function_tool(tool_input_guardrails=[enforcement_guardrail()])
+enforcer = PolicyEnforcer(endpoint, bound_agent_key, tool_ids={"run_sql": registered_sql_tool_id})
+
+@function_tool(tool_input_guardrails=[enforcement_guardrail(enforcer)])
 def run_sql(database: str, sql: str) -> str: ...
 ```
 
@@ -108,11 +111,14 @@ pip install "gentrail[langchain]"
 ```python
 from langchain.agents import create_agent
 from gentrail.langchain import enforcement_middleware
+from gentrail.enforcement import PolicyEnforcer
+
+enforcer = PolicyEnforcer(endpoint, bound_agent_key, tool_ids={"run_sql": registered_sql_tool_id})
 
 agent = create_agent(
     model=model,
     tools=tools,
-    middleware=[enforcement_middleware(agent_id="reporter")],
+    middleware=[enforcement_middleware(enforcer, agent_id="reporter")],
 )
 ```
 
@@ -154,7 +160,7 @@ framework (above) to get BLOCK and GATE verdicts before a tool runs.
 
 ## Configuration
 
-All through environment variables:
+Tool mappings are explicit SDK options. Tracing and endpoint settings use:
 
 - `GENTRAIL_API_KEY`: enables OTLP export of governance spans.
 - `OTEL_EXPORTER_OTLP_ENDPOINT`: collector base URL, default
@@ -185,24 +191,18 @@ builds and, via `GentrailSpanProcessor`, to `gen_ai.*`, `ai.*`, and
 OpenInference attributes on spans your framework emits itself. On by default;
 opt out with `GENTRAIL_REDACT_PII=false` or `instrument(redact=False)`.
 
-## Inline enforcement (opt-in)
+## Inline enforcement
 
-The async backend evaluator only sees a trace after a tool has already run, so
-it can detect but never prevent. Enforcement happens here, in the before-tool-call
-hook: the SDK asks the backend for a verdict on the proposed tool call and stops
-it before it executes.
+Enforcement is optional to configure, but once configured it always fails closed.
+Set `GENTRAIL_DECIDE_ENDPOINT` and an agent-bound `GENTRAIL_API_KEY`, then supply
+registered tool IDs through `init(tool_ids=...)`, `from_env(tool_ids=...)` or an
+explicit enforcer. Unknown mappings, unavailable decisions and missing admission
+keep execution blocked. Human approval alone does not authorize execution.
 
-It is opt-in and fails open. Set both environment variables to turn it on:
-
-```bash
-export GENTRAIL_DECIDE_ENDPOINT="https://your-dashboard.example"
-export GENTRAIL_API_KEY="sk-..."
-```
-
-With these set, a `BLOCK` verdict cancels the tool call (the agent receives an
-error tool result and the tool never runs). A `GATE` verdict also stops the call
-pending human approval. A backend error never breaks the agent: the call is
-allowed and enforcement is skipped for that step.
+Strands and LangChain snapshot tool input before authorization and use that copy
+for execution. Place the enforcement middleware closest to the tool body, after
+other middleware has finalized its arguments. Changes made by downstream custom
+middleware are outside this enforcement boundary.
 
 ## Advanced: raw capture surfaces
 

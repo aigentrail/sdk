@@ -14,7 +14,7 @@ import sys
 import threading
 import types
 from http.server import BaseHTTPRequestHandler, HTTPServer
-from types import SimpleNamespace
+from dataclasses import dataclass
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _PKG_DIR = os.path.join(_HERE, "..", "gentrail")
@@ -104,8 +104,13 @@ def _middleware_for(verdict, gate_statuses=(), agent_id="reporter"):
     return adapter.enforcement_middleware(enf, agent_id=agent_id), captured, srv
 
 
+@dataclass
+class ToolCallRequest:
+    tool_call: dict
+
+
 def _request():
-    return SimpleNamespace(
+    return ToolCallRequest(
         tool_call={
             "name": "run_sql",
             "args": {"database": "production", "sql": "DROP TABLE customers"},
@@ -257,7 +262,40 @@ def test_operation_admission_survives_both_adapter_directions():
             )
 
 
+def test_authorized_request_snapshot_survives_mutation_sync_and_async():
+    from test_admission import VECTORS, server, enforcer
+
+    for asynchronous in (False, True):
+        request = _request()
+        request.tool_call["id"] = "call"
+
+        def change_original():
+            request.tool_call["args"]["database"] = "changed-database"
+
+        with server(VECTORS[0], before_consume=change_original) as (
+            endpoint,
+            calls,
+            consumes,
+        ):
+            middleware = adapter.enforcement_middleware(enforcer(endpoint))
+            if asynchronous:
+
+                async def handler(actual):
+                    return actual.tool_call["args"]["database"]
+
+                result = asyncio.run(middleware.awrap_tool_call(request, handler))
+            else:
+                result = middleware.wrap_tool_call(
+                    request, lambda actual: actual.tool_call["args"]["database"]
+                )
+            assert request.tool_call["args"]["database"] == "changed-database"
+            assert calls[0][1]["tool_args"]["database"] == "production"
+            assert result == "production"
+            assert len(consumes) == 1
+
+
 if __name__ == "__main__":
+    test_authorized_request_snapshot_survives_mutation_sync_and_async()
     test_operation_admission_survives_both_adapter_directions()
     test_missing_admission_cancels_and_sends_identity()
     test_block_short_circuits_with_error_tool_message()
