@@ -17,35 +17,51 @@ npm 11).
 Available since 0.4.0. See [release preparation](../../RELEASE.md)
 for package verification and rollout.
 
-Use an agent-bound API key and opt into fail-closed enforcement:
+Use an agent-bound API key and a registered tool ID:
 
 ```typescript
 import { PolicyEnforcer, guardTools } from "@gentrail/ai";
 
-const enforcer = new PolicyEnforcer({ endpoint, apiKey: boundAgentKey, strictAdmission: true });
-const outcome = await enforcer.enforce("issue_refund", arguments, { requestId: toolCallId });
+const enforcer = new PolicyEnforcer({ endpoint, apiKey: boundAgentKey });
+const outcome = await enforcer.enforce("issue_refund", arguments, {
+  toolId: registeredRefundToolId,
+  requestId: toolCallId,
+});
 if (!outcome.allowed) throw new Error(outcome.message);
 const result = await issueRefund(arguments);
 
-const guarded = guardTools(tools, { endpoint, apiKey: boundAgentKey, strictAdmission: true });
+const guarded = guardTools(tools, {
+  endpoint,
+  apiKey: boundAgentKey,
+  toolIds: { issue_refund: registeredRefundToolId },
+});
 ```
 
-`PolicyEnforcer.fromEnv({ strictAdmission: true })` uses the existing endpoint
-and key variables. Missing configuration in explicit strict setup raises an
-error. `guardTools` carries strict enforcement into the Vercel AI tool boundary.
+Configured enforcement always fails closed and requires `operation_v1` admission,
+including operations without a quota. `guardTools` requires an explicit mapping
+for each executable tool. It snapshots input before authorization and executes
+that snapshot, so caller mutations during approval/admission cannot change the
+authorized parameters. Non-cloneable inputs fail before execution. With neither
+endpoint nor key configured it leaves
+observe-only tools untouched; partial guard configuration throws an error.
+`PolicyEnforcer.fromEnv()` uses the existing endpoint and key variables; supply
+`toolId` on each `decide` or `enforce` call.
 
-Enforcement resolves approval, then reserves and consumes capacity once before
-returning permission to run. Outages, unknown outcomes, expired or malformed
-receipts, foreign controls, redirects and lost consume replies block execution.
-A repeated request ID cannot reuse consumed authority. A crash, tool failure or
-later host refusal leaves the consumed attempt charged. Never retry execution
-because evidence reporting failed.
+Enforcement resolves every required approval, then reserves and consumes one
+policy-bound lease before returning permission to run. Outages, missing admission,
+unknown outcomes, expired or malformed receipts, foreign controls, redirects and
+lost consume replies block execution. Low-level `decide` and `awaitGate` do not
+grant execution authority.
 
-Low-level `decide` and `awaitGate` do not grant quota execution authority.
-Admission has a nine-second total budget, at most three seconds per request and
-64 KiB receipts; consume is never retried. Non-quota decisions add no reservation
-requests. Without strict opt-in, decision outages retain their existing
-fail-open behavior; receiving an admission resource still requires strict support.
+A repeated request ID cannot reuse consumed authority. Closed and uncertain
+attempts return different recovery guidance. Do not retry automatically after a
+lost consume reply or failed evidence report: check the attempt's outcome first.
+A crash or tool failure after consumption does not restore permission. To request
+a fresh evaluation, use a new `requestId` and set `parentRequestId` to the earlier
+request; the new decision does not inherit approvals.
+
+Admission has a nine-second total budget, at most three seconds per request,
+a 30-second lease limit and 64 KiB receipts. Consume is never retried.
 
 ## Quickstart
 
@@ -96,25 +112,26 @@ import { guardTools } from "@gentrail/ai";
 
 const result = streamText({
   model,
-  tools: guardTools(tools, { agentId: "billing-agent" }),
+  tools: guardTools(tools, { agentId: "billing-agent", toolIds: registeredToolIds }),
   prompt: "Reconcile the Q3 invoices",
 });
 ```
 
-- `ALLOW` runs the tool unchanged.
+- Verified `ALLOW` runs the authorized input snapshot after admission.
 - `BLOCK` throws a `GentrailPolicyError` carrying the policy message; the AI
   SDK turns errors thrown inside `execute` into `tool-error` parts, so the
   model sees the message and the run continues.
 - `GATE` polls the approval status until a human decides in the Gentrail
   dashboard. Approved runs the tool; denied, expired, or unanswered throws like
   `BLOCK`. The gate fails closed.
-- A decide transport error fails open: the tool runs and enforcement is
-  skipped for that call.
+- A decide transport error blocks execution. An ALLOW or approved gate without
+  admission cannot run a tool.
 
 ```ts
 guardTools(tools, {
   endpoint,            // default GENTRAIL_DECIDE_ENDPOINT
   apiKey,              // default GENTRAIL_API_KEY
+  toolIds,             // registered ID for each executable tool name
   agentId,             // scopes agent-targeted and windowed rules
   invocationId,        // joins the enforcement record to your trace
   decideTimeoutMs,     // default 3000
@@ -139,6 +156,7 @@ const outcome = await enforcer?.enforce(
   "wire_money",
   { amount: 5000 },
   {
+    toolId: registeredWireToolId,
     agentId: "treasury-agent",
     requestId: toolCallId, // synthesized when absent
   },
@@ -148,8 +166,9 @@ if (outcome && !outcome.allowed) {
 }
 ```
 
-`decide()` fails open to `ALLOW`, `awaitGate()` fails closed to `"timeout"`,
-and `invocation_id` defaults to the active OpenTelemetry trace id.
+`decide()` fails closed to `BLOCK` on backend errors; `awaitGate()` returns
+`"timeout"` on failure. Neither grants execution authority alone. `invocation_id`
+defaults to the active OpenTelemetry trace ID.
 
 ## Governance tracing
 
@@ -300,8 +319,7 @@ npm test
 ### Linking tool results to decisions
 
 `PolicyEnforcer.decide()` returns `outcome` as `verified`, `request_conflict`, or
-`unavailable`. Transport errors retain fail-open permission with an explicit
-unavailable outcome. `enforce()` also returns the original verdict in `verdict`.
+`unavailable`. Transport errors return `BLOCK` with an explicit unavailable outcome. `enforce()` also returns the original verdict in `verdict`.
 
 A verified, attributed verdict can carry `observation_reference` and a
 server-provided `observations_url`. Pass the reference as `decisionReference`

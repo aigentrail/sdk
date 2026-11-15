@@ -13,9 +13,12 @@ import (
 	"time"
 )
 
-const Protocol = "quota_v1"
+const Protocol = "operation_v1"
+const leaseLifetimeSeconds int64 = 30
 
 var ErrQuotaExhausted = errors.New("admission: tool-call allowance exhausted")
+var ErrAttemptClosed = errors.New("admission: attempt already consumed or canceled")
+var ErrConsumptionUncertain = errors.New("admission: consumption could not be confirmed")
 
 type Link struct {
 	Required     bool   `json:"required"`
@@ -63,12 +66,10 @@ type admissionReceipt struct {
 }
 
 type admissionReservation struct {
-	RequestID   string `json:"request_id"`
-	State       string `json:"state"`
-	ExpiresAt   int64  `json:"expires_at"`
-	WindowStart int64  `json:"window_start"`
-	WindowEnd   int64  `json:"window_end"`
-	RevisionID  string `json:"revision_id"`
+	RequestID    string `json:"request_id"`
+	State        string `json:"state"`
+	ExpiresAt    int64  `json:"expires_at"`
+	PolicyDigest string `json:"policy_digest"`
 }
 
 func (c Client) Authorize(ctx context.Context, requestID string, link Link) error {
@@ -87,18 +88,28 @@ func (c Client) Authorize(ctx context.Context, requestID string, link Link) erro
 	if reserved.Outcome == "quota_exhausted" {
 		return ErrQuotaExhausted
 	}
+	if reserved.Outcome == "verified" && !reserved.ExecutionAuthorized {
+		for _, state := range []string{"consumed", "released"} {
+			if c.validReceipt(reserved, requestID, state) {
+				return ErrAttemptClosed
+			}
+		}
+	}
 	if !c.validReceipt(reserved, requestID, "reserved") || reserved.ExecutionAuthorized || reserved.ConsumeURL == "" {
 		return errors.New("admission: reservation was not verified")
 	}
 	consumed, err := c.exchange(ctx, http.MethodPost, reserved.ConsumeURL, link.ProposalHash)
 	if err != nil {
-		return err
+		return fmt.Errorf("%w: %w", ErrConsumptionUncertain, err)
 	}
 	if !c.validReceipt(consumed, requestID, "consumed") || !consumed.ExecutionAuthorized || !sameAdmissionReservation(reserved, consumed) {
-		return errors.New("admission: execution was not authorized")
+		if c.validReceipt(consumed, requestID, "consumed") && !consumed.ExecutionAuthorized && sameAdmissionReservation(reserved, consumed) {
+			return ErrAttemptClosed
+		}
+		return ErrConsumptionUncertain
 	}
 	if ctx.Err() != nil {
-		return ctx.Err()
+		return fmt.Errorf("%w: %w", ErrConsumptionUncertain, ctx.Err())
 	}
 	return nil
 }
@@ -106,14 +117,18 @@ func (c Client) Authorize(ctx context.Context, requestID string, link Link) erro
 func (c Client) validReceipt(receipt admissionReceipt, requestID, state string) bool {
 	reservation := receipt.Reservation
 	now := c.Now().Unix()
+	digest, err := hex.DecodeString(reservation.PolicyDigest)
 	return receipt.Outcome == "verified" && reservation.RequestID == requestID && reservation.State == state &&
-		reservation.RevisionID != "" && reservation.WindowStart <= now && now < reservation.ExpiresAt &&
-		reservation.ExpiresAt <= reservation.WindowEnd
+		err == nil && len(digest) == 32 && now > 0 && now < reservation.ExpiresAt && reservation.ExpiresAt-now <= leaseLifetimeSeconds
 }
 
 func sameAdmissionReservation(reserved, consumed admissionReceipt) bool {
 	expected := reserved.Reservation
 	expected.State = "consumed"
+	if consumed.Reservation.ExpiresAt > expected.ExpiresAt {
+		return false
+	}
+	expected.ExpiresAt = consumed.Reservation.ExpiresAt
 	return consumed.Reservation == expected
 }
 

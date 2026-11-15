@@ -3,7 +3,12 @@ import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import test from "node:test";
 import { PolicyEnforcer, guardTools } from "../src/index.js";
-import { AdmissionClient, boundedJson } from "../src/admission.js";
+import {
+  AdmissionClient,
+  AttemptClosedError,
+  ConsumptionUncertainError,
+  boundedJson,
+} from "../src/admission.js";
 import { readSpecJson, withEnv } from "./support.js";
 
 interface Vector {
@@ -12,8 +17,9 @@ interface Vector {
   reserved: Record<string, unknown>;
   consumed: Record<string, unknown>;
   allowed: boolean;
+  requests: number;
 }
-const vectors = readSpecJson("admission_vectors.json") as Vector[];
+const vectors = readSpecJson("operation_admission_vectors.json") as Vector[];
 
 async function quotaServer(
   options: {
@@ -24,6 +30,7 @@ async function quotaServer(
     verdict?: unknown;
     liveTime?: boolean;
     slow?: boolean;
+    beforeConsume?: () => void;
   } = {},
 ) {
   const vector = structuredClone(options.vector ?? vectors[0]);
@@ -32,7 +39,7 @@ async function quotaServer(
     for (const receipt of [vector.reserved, vector.consumed]) {
       Object.assign(receipt.reservation as object, {
         window_start: now - 10,
-        expires_at: now + 60,
+        expires_at: now + 20,
         window_end: now + 120,
       });
     }
@@ -75,6 +82,7 @@ async function quotaServer(
         } else {
           assert.equal(path, "/consume");
           consumes++;
+          options.beforeConsume?.();
           if (options.lost) {
             req.socket.destroy();
             return;
@@ -115,7 +123,6 @@ function client(endpoint: string): PolicyEnforcer {
   return new PolicyEnforcer({
     endpoint,
     apiKey: "key",
-    strictAdmission: true,
     now: () => 100000,
     idGen: () => "call",
   });
@@ -126,7 +133,11 @@ test("strict admission matches every shared Go/Python receipt vector", async () 
   for (const vector of vectors) {
     const srv = await quotaServer({ vector });
     try {
-      const result = await client(srv.endpoint).enforce("Read", {});
+      const result = await client(srv.endpoint).enforce(
+        "Read",
+        {},
+        { toolId: "registered-read" },
+      );
       assert.equal(result.allowed, vector.allowed, vector.name);
       if (vector.name === "quota exhausted") {
         assert.equal(
@@ -134,8 +145,9 @@ test("strict admission matches every shared Go/Python receipt vector", async () 
           "This agent has used its tool-call allowance for the current quota window.",
         );
       }
-      assert.equal(srv.calls[0].body.admission_protocol, "quota_v1");
+      assert.equal(srv.calls[0].body.admission_protocol, "operation_v1");
       assert.ok(srv.consumes <= 1);
+      assert.equal(srv.calls.length - 1, vector.requests, vector.name);
     } finally {
       await srv.close();
     }
@@ -147,7 +159,13 @@ test("approval precedes reservation; denied and expired holds never consume", as
     const srv = await quotaServer({ gate });
     try {
       assert.equal(
-        (await client(srv.endpoint).enforce("Read", {})).allowed,
+        (
+          await client(srv.endpoint).enforce(
+            "Read",
+            {},
+            { toolId: "registered-read" },
+          )
+        ).allowed,
         gate === "approved",
       );
       assert.deepEqual(
@@ -166,10 +184,22 @@ test("decide alone never consumes; replay cannot authorize execution twice", asy
   const srv = await quotaServer();
   try {
     const enforcer = client(srv.endpoint);
-    assert.equal((await enforcer.decide("Read", {})).decision, "ALLOW");
+    assert.equal(
+      (await enforcer.decide("Read", {}, { toolId: "registered-read" }))
+        .decision,
+      "ALLOW",
+    );
     assert.equal(srv.consumes, 0);
-    assert.equal((await enforcer.enforce("Read", {})).allowed, true);
-    assert.equal((await enforcer.enforce("Read", {})).allowed, false);
+    assert.equal(
+      (await enforcer.enforce("Read", {}, { toolId: "registered-read" }))
+        .allowed,
+      true,
+    );
+    assert.equal(
+      (await enforcer.enforce("Read", {}, { toolId: "registered-read" }))
+        .allowed,
+      false,
+    );
     assert.equal(srv.consumes, 2);
   } finally {
     await srv.close();
@@ -181,7 +211,13 @@ test("lost consume replies and redirects never retry or authorize", async () => 
     const srv = await quotaServer(options);
     try {
       assert.equal(
-        (await client(srv.endpoint).enforce("Read", {})).allowed,
+        (
+          await client(srv.endpoint).enforce(
+            "Read",
+            {},
+            { toolId: "registered-read" },
+          )
+        ).allowed,
         false,
       );
       assert.equal(srv.consumes, options.lost ? 1 : 0);
@@ -194,7 +230,13 @@ test("lost consume replies and redirects never retry or authorize", async () => 
 
 test("strict decisions fail closed on outages and malformed authority", async () => {
   assert.equal(
-    (await client("http://127.0.0.1:1").enforce("Read", {})).allowed,
+    (
+      await client("http://127.0.0.1:1").enforce(
+        "Read",
+        {},
+        { toolId: "registered-read" },
+      )
+    ).allowed,
     false,
   );
   for (const verdict of [
@@ -213,7 +255,13 @@ test("strict decisions fail closed on outages and malformed authority", async ()
     const srv = await quotaServer({ verdict });
     try {
       assert.equal(
-        (await client(srv.endpoint).enforce("Read", {})).allowed,
+        (
+          await client(srv.endpoint).enforce(
+            "Read",
+            {},
+            { toolId: "registered-read" },
+          )
+        ).allowed,
         false,
       );
       assert.equal(srv.calls.length, 1);
@@ -223,14 +271,20 @@ test("strict decisions fail closed on outages and malformed authority", async ()
   }
 });
 
-test("verified non-quota decisions do not add admission requests", async () => {
+test("verified decisions without mandatory admission cannot execute", async () => {
   const srv = await quotaServer({
     verdict: { decision: "ALLOW", outcome: "verified" },
   });
   try {
     assert.equal(
-      (await client(srv.endpoint).enforce("Read", {})).allowed,
-      true,
+      (
+        await client(srv.endpoint).enforce(
+          "Read",
+          {},
+          { toolId: "registered-read" },
+        )
+      ).allowed,
+      false,
     );
     assert.equal(srv.calls.length, 1);
   } finally {
@@ -254,7 +308,7 @@ test("guardTools consumes at execution and refuses replay", async () => {
       {
         endpoint: srv.endpoint,
         apiKey: "key",
-        strictAdmission: true,
+        toolIds: { Read: "registered-read" },
       },
     );
     assert.equal(await tools.Read.execute({}, { toolCallId: "call" }), "ran");
@@ -266,12 +320,17 @@ test("guardTools consumes at execution and refuses replay", async () => {
   }
 });
 
-test("guardTools strict opt-in cannot silently disable missing configuration", async () => {
+test("guardTools requires a registered mapping when configured", async () => {
   await withEnv(
     { GENTRAIL_DECIDE_ENDPOINT: undefined, GENTRAIL_API_KEY: undefined },
     () => {
-      assert.throws(() => guardTools({}, { strictAdmission: true }));
-      assert.throws(() => PolicyEnforcer.fromEnv({ strictAdmission: true }));
+      assert.throws(() =>
+        guardTools(
+          { Read: { execute() {} } },
+          { endpoint: "http://localhost", apiKey: "key" },
+        ),
+      );
+      assert.equal(PolicyEnforcer.fromEnv(), null);
     },
   );
 });
@@ -282,7 +341,13 @@ test("admission receipt sizes and stalled responses are bounded", async () => {
   const oversized = await quotaServer({ vector });
   try {
     assert.equal(
-      (await client(oversized.endpoint).enforce("Read", {})).allowed,
+      (
+        await client(oversized.endpoint).enforce(
+          "Read",
+          {},
+          { toolId: "registered-read" },
+        )
+      ).allowed,
       false,
     );
     assert.equal(oversized.consumes, 0);
@@ -305,4 +370,72 @@ test("admission receipt sizes and stalled responses are bounded", async () => {
     await slow.close();
   }
   await assert.rejects(boundedJson(new Response("x".repeat(65)), 64));
+});
+
+test("closed and uncertain attempts have distinct recovery errors without retry", async () => {
+  for (const mode of ["replay", "lost", "consumed", "released"]) {
+    const vector = structuredClone(vectors[0]);
+    if (mode === "replay") {
+      vector.consumed.execution_authorized = false;
+    }
+    if (mode === "consumed" || mode === "released") {
+      (vector.reserved.reservation as Record<string, unknown>).state = mode;
+    }
+    const srv = await quotaServer({ vector, lost: mode === "lost" });
+    try {
+      const admission = new AdmissionClient(
+        srv.endpoint + "/api/v1/decide",
+        "key",
+        3000,
+        () => 100000,
+      );
+      await assert.rejects(
+        admission.authorize("call", vector.link),
+        mode === "lost" ? ConsumptionUncertainError : AttemptClosedError,
+      );
+      assert.equal(
+        srv.consumes,
+        mode === "consumed" || mode === "released" ? 0 : 1,
+      );
+    } finally {
+      await srv.close();
+    }
+  }
+});
+
+test("guardTools executes the authorized snapshot when caller input changes during admission", async () => {
+  const input = { file_path: "README.md" };
+  const srv = await quotaServer({
+    liveTime: true,
+    beforeConsume: () => {
+      input.file_path = "private.env";
+    },
+  });
+  let executedPath = "";
+  try {
+    const tools = guardTools(
+      {
+        Read: {
+          async execute(
+            actual: typeof input,
+            _options: { toolCallId: string },
+          ) {
+            executedPath = actual.file_path;
+          },
+        },
+      },
+      {
+        endpoint: srv.endpoint,
+        apiKey: "key",
+        toolIds: { Read: "registered-read" },
+      },
+    );
+    await tools.Read.execute(input, { toolCallId: "call" });
+    assert.equal(input.file_path, "private.env");
+    assert.deepEqual(srv.calls[0].body.tool_args, { file_path: "README.md" });
+    assert.equal(executedPath, "README.md");
+    assert.equal(srv.consumes, 1);
+  } finally {
+    await srv.close();
+  }
 });

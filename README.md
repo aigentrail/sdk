@@ -21,9 +21,9 @@ are native to each ecosystem; the table records current implementation support.
 | Enforced decision stamped on tool spans | `enforced_decision=` | `EnforcedDecision` | `enforcedDecision` |
 | PII redaction before export | `redact_pii` | built into the exporter | `redactPII` |
 | Redaction of GenAI attributes on spans other libraries emit | `instrument()` | `Instrument()` | `instrument()` |
-| Inline enforcement: decide (fails open) and gate wait (fails closed) | `PolicyEnforcer` | `Enforcer` | `PolicyEnforcer` |
+| Inline policy and approval checks | `PolicyEnforcer` | `Enforcer` | `PolicyEnforcer` |
 | One decide-and-gate cycle | `enforce()` | `Enforcer.Enforce` | `PolicyEnforcer.enforce` |
-| Strict tool-call quota admission, explicit opt-in | `strict_admission=True` (sync and async) | `WithStrictAdmission()` | `strictAdmission: true` |
+| `operation_v1` execution admission | Mandatory; `tool_id` or configured mapping | Mandatory for configured enforcers | Mandatory; `toolId` or `guardTools` mapping |
 | Evidence ledger with sealed, hash-verified decision journals | `EvidenceLedger` | `EvidenceLedger` | `EvidenceLedger` |
 | HTTP model-call instrumentation | `tracer.httpx_transport()` | `Tracer.HTTPRoundTripper` | `tracer.fetch()` |
 | Framework adapters | Strands, LangChain, OpenAI Agents | none | Vercel AI SDK (`guardTools`) |

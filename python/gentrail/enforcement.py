@@ -22,6 +22,8 @@ from typing import Any, Callable
 
 from .admission import (
     AdmissionClient,
+    AttemptClosedError,
+    ConsumptionUncertainError,
     NoRedirect,
     PROTOCOL,
     QuotaExhaustedError,
@@ -34,9 +36,7 @@ logger = logging.getLogger(__name__)
 
 GATE_POLL_INTERVAL_SECONDS = 2.0
 
-# Identify the client on every request. urllib's default "Python-urllib/x.y"
-# reads as a bot to edge WAFs (e.g. Cloudflare fronting the backend answers 403),
-# which would silently fail-open enforcement; a named agent is allowed through.
+# Use the SDK identity rather than urllib's default user agent.
 _USER_AGENT = "gentrail-sdk-python"
 
 
@@ -49,7 +49,7 @@ class PolicyEnforcer:
         api_key: str,
         timeout: float = 3.0,
         *,
-        strict_admission: bool = False,
+        tool_ids: dict[str, str] | None = None,
         clock: Callable[[], float] = time.time,
         monotonic: Callable[[], float] = time.monotonic,
         id_gen: Callable[[], str] = lambda: uuid.uuid4().hex,
@@ -58,7 +58,17 @@ class PolicyEnforcer:
         self.url = self.base + "/api/v1/decide"
         self.api_key = api_key
         self.timeout = timeout
-        self.strict_admission = strict_admission
+        if tool_ids is not None and len(tool_ids) > 128:
+            raise ValueError("registered tool mappings exceed 128 entries")
+        self._tool_ids = dict(tool_ids or {})
+        if any(
+            not isinstance(name, str)
+            or not name.strip()
+            or not isinstance(identity, str)
+            or not identity.strip()
+            for name, identity in self._tool_ids.items()
+        ):
+            raise ValueError("registered tool mappings need nonempty names and IDs")
         self._id_gen = id_gen
         self._opener = urllib.request.build_opener(NoRedirect())
         self._admission = AdmissionClient(
@@ -73,16 +83,14 @@ class PolicyEnforcer:
         )
 
     @classmethod
-    def from_env(cls, *, strict_admission: bool = False) -> "PolicyEnforcer | None":
+    def from_env(
+        cls, *, tool_ids: dict[str, str] | None = None
+    ) -> "PolicyEnforcer | None":
         endpoint = os.environ.get("GENTRAIL_DECIDE_ENDPOINT", "").strip()
         api_key = os.environ.get("GENTRAIL_API_KEY", "").strip()
         if not endpoint or not api_key:
-            if strict_admission:
-                raise ValueError(
-                    "Strict admission needs a decide endpoint and agent-bound API key"
-                )
             return None
-        return cls(endpoint, api_key, strict_admission=strict_admission)
+        return cls(endpoint, api_key, tool_ids=tool_ids)
 
     def decide(
         self,
@@ -92,31 +100,33 @@ class PolicyEnforcer:
         agent_id: str = "",
         invocation_id: str = "",
         request_id: str = "",
+        tool_id: str = "",
+        parent_request_id: str = "",
     ) -> dict:
-        """Return the backend verdict: {"decision": BLOCK|GATE|ALLOW, "rule", "message"}.
+        """Evaluate a registered tool proposal without granting execution authority.
 
-        agent_id scopes agent-targeted and windowed rules to the caller;
-        invocation_id (the invocation's OTel trace id) lets the backend join
-        the enforcement record to the ingested trace and gives a GATE approver
-        context, and defaults to the ambient trace when a span is recording;
-        request_id makes the backend's GATE/BLOCK writes idempotent under
-        retries. The backend requires a request_id, so a caller without a
-        framework call id gets a synthesized one (unique, so it never dedups a
-        legitimate second call). It refuses to record a BLOCK/GATE with no
-        agent_id or invocation_id, since it could not be joined to its trace
-        and would double-count against the evaluator's own row.
-
-        Decision errors fail open by default. Strict admission fails closed;
-        callers must use enforce to obtain quota execution authority.
+        tool_id overrides the configured name mapping. request_id identifies this
+        exact attempt; parent_request_id links a fresh attempt to a prior decision
+        without copying its approvals. Invocation defaults to the ambient trace.
+        Operational failures return BLOCK with an unavailable outcome.
         """
+        tool_id = tool_id or self._tool_ids.get(tool_name, "")
+        if not tool_id.strip():
+            return {
+                "decision": "BLOCK",
+                "outcome": "unavailable",
+                "message": "Gentrail needs a registered tool ID; the call was not run.",
+            }
         payload = {
+            "tool_id": tool_id,
+            "admission_protocol": PROTOCOL,
             "event_type": "tool_call",
             "tool_name": tool_name,
             "tool_args": tool_args,
             "request_id": request_id or self._id_gen(),
         }
-        if self.strict_admission:
-            payload["admission_protocol"] = PROTOCOL
+        if parent_request_id:
+            payload["parent_request_id"] = parent_request_id
         if agent_id:
             payload["agent_id"] = agent_id
         invocation_id = invocation_id or ambient_otel_trace_id()
@@ -141,23 +151,21 @@ class PolicyEnforcer:
                 verdict = json.loads(response.decode())
                 verdict = _checked_verdict(verdict, payload)
                 verdict["_request_id"] = payload["request_id"]
-                if self.strict_admission and verdict["outcome"] != "verified":
+                if verdict["outcome"] != "verified":
                     verdict["decision"] = "BLOCK"
                 return verdict
         except Exception as e:
             logger.warning("enforcement decide failed (%s) for tool %s", e, tool_name)
             return {
-                "decision": "BLOCK" if self.strict_admission else "ALLOW",
+                "decision": "BLOCK",
                 "outcome": "unavailable",
             }
 
     def authorize_admission(self, verdict: dict) -> tuple[bool, str]:
         if "admission" not in verdict:
-            return True, ""
-        if not self.strict_admission:
             return (
                 False,
-                "Strict tool-call quotas require strict_admission and an agent-bound credential.",
+                "Gentrail did not provide execution admission; the call was not run.",
             )
         try:
             self._admission.authorize(
@@ -167,6 +175,16 @@ class PolicyEnforcer:
             return (
                 False,
                 "This agent has used its tool-call allowance for the current quota window.",
+            )
+        except AttemptClosedError:
+            return (
+                False,
+                "This tool-call attempt is already consumed or canceled. Check its outcome before starting a new attempt.",
+            )
+        except ConsumptionUncertainError:
+            return (
+                False,
+                "Gentrail could not confirm execution admission. Do not retry automatically; check this attempt's outcome before starting another.",
             )
         except Exception as error:
             logger.warning("tool-call admission failed (%s)", error)
@@ -217,7 +235,15 @@ class PolicyEnforcer:
             },
         )
         with self._opener.open(req, timeout=self.timeout) as resp:
-            return json.loads(resp.read().decode()).get("status", "pending")
+            raw = resp.read(65537)
+            if len(raw) > 65536:
+                raise ValueError("approval response exceeds size limit")
+            body = json.loads(raw)
+            if not isinstance(body, dict) or not isinstance(
+                body.get("status", "pending"), str
+            ):
+                raise ValueError("invalid approval status")
+            return body.get("status", "pending")
 
 
 class AsyncPolicyEnforcer:
@@ -226,7 +252,7 @@ class AsyncPolicyEnforcer:
     Each HTTP round trip is the sync urllib call moved off the event loop with
     asyncio.to_thread, so the base install still needs no HTTP client
     dependency, while GATE polling waits with asyncio.sleep instead of
-    parking a thread. Strict admission and approval behavior match the sync client.
+    parking a thread. Admission and approval behavior match the sync client.
     """
 
     def __init__(
@@ -245,9 +271,9 @@ class AsyncPolicyEnforcer:
 
     @classmethod
     def from_env(
-        cls, *, strict_admission: bool = False
+        cls, *, tool_ids: dict[str, str] | None = None
     ) -> "AsyncPolicyEnforcer | None":
-        sync = PolicyEnforcer.from_env(strict_admission=strict_admission)
+        sync = PolicyEnforcer.from_env(tool_ids=tool_ids)
         if sync is None:
             return None
         return cls.from_sync(sync)
@@ -276,6 +302,8 @@ class AsyncPolicyEnforcer:
         agent_id: str = "",
         invocation_id: str = "",
         request_id: str = "",
+        tool_id: str = "",
+        parent_request_id: str = "",
     ) -> dict:
         return await asyncio.to_thread(
             self._sync.decide,
@@ -284,6 +312,8 @@ class AsyncPolicyEnforcer:
             agent_id=agent_id,
             invocation_id=invocation_id,
             request_id=request_id,
+            tool_id=tool_id,
+            parent_request_id=parent_request_id,
         )
 
     async def await_gate(self, approval: dict, *, timeout: float | None = None) -> str:
@@ -324,14 +354,14 @@ def enforce(
     agent_id: str = "",
     invocation_id: str = "",
     request_id: str = "",
+    tool_id: str = "",
+    parent_request_id: str = "",
 ) -> "tuple[bool, str]":
     """One decide-and-gate cycle: (allowed, cancel_message).
 
-    ALLOW and an approved GATE return (True, ""); BLOCK and a denied, expired,
-    or unanswered GATE return (False, message) where the message is what the
-    model should see in place of the tool result. This is the framework-neutral
-    core the adapters share; enforcer is any object with the PolicyEnforcer
-    decide/await_gate surface.
+    Verified ALLOW and approved GATE still require single-use admission before
+    returning (True, ""). All other outcomes return (False, message). Framework
+    adapters share this boundary; a policy verdict alone cannot run a tool.
     """
     verdict = enforcer.decide(
         tool_name,
@@ -339,6 +369,8 @@ def enforce(
         agent_id=agent_id,
         invocation_id=invocation_id,
         request_id=request_id,
+        tool_id=tool_id,
+        parent_request_id=parent_request_id,
     )
     return finish_enforcement(enforcer, verdict)
 
@@ -347,13 +379,13 @@ def finish_enforcement(enforcer, verdict: dict) -> tuple[bool, str]:
     decision = verdict.get("decision")
     if decision == "BLOCK":
         return False, _verdict_message(verdict)
+    if decision not in ("ALLOW", "GATE") or verdict.get("outcome") != "verified":
+        return False, "Gentrail could not verify the decision; the call was not run."
     if decision == "GATE":
         status = enforcer.await_gate(verdict.get("approval") or {})
         if status != "approved":
             return False, f"{_verdict_message(verdict)} (approval {status})"
-    if "admission" in verdict:
-        return enforcer.authorize_admission(verdict)
-    return True, ""
+    return enforcer.authorize_admission(verdict)
 
 
 async def enforce_async(
@@ -364,6 +396,8 @@ async def enforce_async(
     agent_id: str = "",
     invocation_id: str = "",
     request_id: str = "",
+    tool_id: str = "",
+    parent_request_id: str = "",
 ) -> "tuple[bool, str]":
     """enforce() for an AsyncPolicyEnforcer-shaped enforcer."""
     verdict = await enforcer.decide(
@@ -372,17 +406,19 @@ async def enforce_async(
         agent_id=agent_id,
         invocation_id=invocation_id,
         request_id=request_id,
+        tool_id=tool_id,
+        parent_request_id=parent_request_id,
     )
     decision = verdict.get("decision")
     if decision == "BLOCK":
         return False, _verdict_message(verdict)
+    if decision not in ("ALLOW", "GATE") or verdict.get("outcome") != "verified":
+        return False, "Gentrail could not verify the decision; the call was not run."
     if decision == "GATE":
         status = await enforcer.await_gate(verdict.get("approval") or {})
         if status != "approved":
             return False, f"{_verdict_message(verdict)} (approval {status})"
-    if "admission" in verdict:
-        return await enforcer.authorize_admission(verdict)
-    return True, ""
+    return await enforcer.authorize_admission(verdict)
 
 
 def ambient_otel_trace_id() -> str:

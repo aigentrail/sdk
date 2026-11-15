@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
-	"math/big"
 	"slices"
 	"strconv"
 	"strings"
@@ -179,11 +178,27 @@ func canonicalInteger(value any) (string, bool) {
 func canonicalJSONNumber(number json.Number) (string, error) {
 	text := string(number)
 	if !strings.ContainsAny(text, ".eE") {
-		integer, ok := new(big.Int).SetString(text, 10)
-		if !ok {
+		digits := text
+		negative := strings.HasPrefix(digits, "-")
+		if strings.HasPrefix(digits, "-") || strings.HasPrefix(digits, "+") {
+			digits = digits[1:]
+		}
+		if digits == "" {
 			return "", fmt.Errorf("gentrail: canonical JSON number %q is not an integer", text)
 		}
-		return integer.String(), nil
+		for _, digit := range digits {
+			if digit < '0' || digit > '9' {
+				return "", fmt.Errorf("gentrail: canonical JSON number %q is not an integer", text)
+			}
+		}
+		digits = strings.TrimLeft(digits, "0")
+		if digits == "" {
+			return "0", nil
+		}
+		if negative {
+			return "-" + digits, nil
+		}
+		return digits, nil
 	}
 	f, err := strconv.ParseFloat(text, 64)
 	if err != nil {

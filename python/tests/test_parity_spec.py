@@ -84,8 +84,12 @@ def test_journal_seal_matches_shared_vectors():
         journal = _journal_from_document(vector["journal"])
         integrity_hash = journal.seal(now=_utc(vector["journal"]["completed_at"]))
         canonical = canonical_json(journal_canonical_document(journal))
-        assert canonical == vector["canonical"], f"{vector['name']}: canonical JSON differs"
-        assert integrity_hash == vector["integrity_hash"], f"{vector['name']}: hash differs"
+        assert canonical == vector["canonical"], (
+            f"{vector['name']}: canonical JSON differs"
+        )
+        assert integrity_hash == vector["integrity_hash"], (
+            f"{vector['name']}: hash differs"
+        )
 
 
 def test_ledger_create_seal_and_lookup():
@@ -94,14 +98,27 @@ def test_ledger_create_seal_and_lookup():
     assert ledger.get(journal.journal_id) is journal
     assert ledger.get_by_agent("agent-1") == [journal]
     integrity_hash = ledger.seal(journal.journal_id)
-    assert journal.sealed and journal.integrity_hash == integrity_hash and len(integrity_hash) == 64
+    assert (
+        journal.sealed
+        and journal.integrity_hash == integrity_hash
+        and len(integrity_hash) == 64
+    )
     assert ledger.seal("missing") is None
 
 
 def test_canonical_json_numbers_follow_ecmascript():
-    cases = {1.5e-7: "1.5e-7", 1e21: "1e+21", 1e20: "100000000000000000000", 0.0001: "0.0001", -0.5: "-0.5", 2.0: "2"}
+    cases = {
+        1.5e-7: "1.5e-7",
+        1e21: "1e+21",
+        1e20: "100000000000000000000",
+        0.0001: "0.0001",
+        -0.5: "-0.5",
+        2.0: "2",
+    }
     for number, want in cases.items():
-        assert canonical_json(number) == want, f"{number!r} -> {canonical_json(number)!r}, want {want!r}"
+        assert canonical_json(number) == want, (
+            f"{number!r} -> {canonical_json(number)!r}, want {want!r}"
+        )
 
 
 class _DecideServer:
@@ -137,16 +154,22 @@ class _DecideServer:
         self._http.shutdown()
 
 
-def test_enforce_matches_shared_vectors():
+def test_legacy_enforcement_vectors_cannot_authorize_without_admission():
     server = _DecideServer()
     try:
-        enforcer = _enforcement.PolicyEnforcer(server.endpoint, "key")
+        enforcer = _enforcement.PolicyEnforcer(
+            server.endpoint,
+            "key",
+            tool_ids={"run_sql": "registered-sql", "wire_transfer": "registered-wire"},
+        )
         enforcer.gate_timeout = 1.0
         for vector in _spec("enforce_vectors.json"):
             server.verdict = vector["verdict"]
             server.gate_status = vector["gate_status"] or "pending"
-            allowed, message = _enforcement.enforce(enforcer, "wire_transfer", {"amount": 5}, agent_id="a")
-            assert (allowed, message) == (vector["allowed"], vector["message"]), f"{vector['name']}: {(allowed, message)}"
+            allowed, message = _enforcement.enforce(
+                enforcer, "wire_transfer", {"amount": 5}, agent_id="a"
+            )
+            assert not allowed, f"{vector['name']}: {(allowed, message)}"
     finally:
         server.close()
 
@@ -155,21 +178,46 @@ def _tracer_with_memory_exporter(redact=True):
     exporter = InMemorySpanExporter()
     provider = TracerProvider()
     provider.add_span_processor(SimpleSpanProcessor(exporter))
-    return _otel.GovernanceTracer(provider.get_tracer("test"), provider, redact=redact), exporter
+    return _otel.GovernanceTracer(
+        provider.get_tracer("test"), provider, redact=redact
+    ), exporter
 
 
 def test_spans_match_shared_spec():
     spec = _spec("spans.json")
     tracer, exporter = _tracer_with_memory_exporter()
     limit = spec["value_rune_limit"]
-    parent = tracer.start_invocation("agent-1", "Agent", "journal-1", "x" * (limit + 10))
-    tracer.record_model_call(parent, model_id="m", prompt="p", response_text="r", input_tokens=1, output_tokens=2, latency_ms=3.0)
-    tracer.record_tool_call(parent, agent_id="agent-1", agent_name="Agent", name="lookup", args="{}", result="ok", duration_ms=4.0, enforced_decision="BLOCK")
-    tracer.end_invocation(parent, response="done", total_tokens=3, tool_count=1, integrity_hash="h")
+    parent = tracer.start_invocation(
+        "agent-1", "Agent", "journal-1", "x" * (limit + 10)
+    )
+    tracer.record_model_call(
+        parent,
+        model_id="m",
+        prompt="p",
+        response_text="r",
+        input_tokens=1,
+        output_tokens=2,
+        latency_ms=3.0,
+    )
+    tracer.record_tool_call(
+        parent,
+        agent_id="agent-1",
+        agent_name="Agent",
+        name="lookup",
+        args="{}",
+        result="ok",
+        duration_ms=4.0,
+        enforced_decision="BLOCK",
+    )
+    tracer.end_invocation(
+        parent, response="done", total_tokens=3, tool_count=1, integrity_hash="h"
+    )
     spans = {span.name: span for span in exporter.get_finished_spans()}
 
     invocation = dict(spans[spec["invocation"]["name"]].attributes)
-    for key in spec["invocation"]["start_attributes"] + spec["invocation"]["end_attributes"]:
+    for key in (
+        spec["invocation"]["start_attributes"] + spec["invocation"]["end_attributes"]
+    ):
         assert key in invocation, f"invocation span missing {key}"
     assert invocation["openinference.span.kind"] == spec["invocation"]["span_kind"]
     assert invocation["source"] == spec["source"]
@@ -196,17 +244,39 @@ def test_httpx_transport_records_model_calls():
     with httpx.Client(transport=tracer.httpx_transport(base)) as client:
         client.post("https://api.example.com/v1/chat")
         client.get("https://api.example.com/v1/models")
-    model_calls = [dict(s.attributes) for s in exporter.get_finished_spans() if s.name == "governance.model_call"]
-    invocations = [dict(s.attributes) for s in exporter.get_finished_spans() if s.name == "governance.invocation"]
-    assert [call["llm.model_name"] for call in model_calls] == ["api.example.com", "api.example.com"]
-    assert [call["input.value"] for call in model_calls] == ["POST /v1/chat", "GET /v1/models"]
-    assert [inv["aigentrail.invocation.status"] for inv in invocations] == ["ok", "http_503"]
+    model_calls = [
+        dict(s.attributes)
+        for s in exporter.get_finished_spans()
+        if s.name == "governance.model_call"
+    ]
+    invocations = [
+        dict(s.attributes)
+        for s in exporter.get_finished_spans()
+        if s.name == "governance.invocation"
+    ]
+    assert [call["llm.model_name"] for call in model_calls] == [
+        "api.example.com",
+        "api.example.com",
+    ]
+    assert [call["input.value"] for call in model_calls] == [
+        "POST /v1/chat",
+        "GET /v1/models",
+    ]
+    assert [inv["aigentrail.invocation.status"] for inv in invocations] == [
+        "ok",
+        "http_503",
+    ]
 
 
 def test_export_filter_lists_match_spec():
     spec = _spec("spans.json")["export_filter"]
-    assert list(_export_filter.GENAI_SIGNAL_ATTRIBUTE_PREFIXES) == spec["attribute_prefixes"]
-    assert sorted(_export_filter.GENAI_SIGNAL_ATTRIBUTE_KEYS) == sorted(spec["attribute_keys"])
+    assert (
+        list(_export_filter.GENAI_SIGNAL_ATTRIBUTE_PREFIXES)
+        == spec["attribute_prefixes"]
+    )
+    assert sorted(_export_filter.GENAI_SIGNAL_ATTRIBUTE_KEYS) == sorted(
+        spec["attribute_keys"]
+    )
 
 
 def test_export_filter_matches_shared_vectors():

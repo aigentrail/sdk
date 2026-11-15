@@ -15,15 +15,19 @@ import (
 )
 
 func TestStrictEnforcementApprovesThenConsumesOnlyOnce(t *testing.T) {
-	for _, gate := range []bool{false, true} {
-		fixture := &quotaEnforcerServer{t: t, gate: gate}
+	for _, decision := range []string{DecisionAllow, DecisionWarn, DecisionLog, DecisionGate} {
+		gate := decision == DecisionGate
+		fixture := &quotaEnforcerServer{t: t, gate: gate, decision: decision}
 		server := httptest.NewServer(http.HandlerFunc(fixture.serveHTTP))
-		e := NewEnforcer(server.URL, "key", WithStrictAdmission())
+		e := NewEnforcer(server.URL, "key")
 		e.now = func() time.Time { return time.Unix(100, 0) }
 		for _, want := range []bool{true, false} {
 			allowed, message := e.Enforce(context.Background(), "Read", nil, WithRequestID("call"))
 			if allowed != want {
 				t.Fatalf("allowed=%v want=%v message=%s", allowed, want, message)
+			}
+			if !want && !strings.Contains(message, "already consumed or canceled") {
+				t.Fatal("closed attempt lost its recovery guidance", message)
 			}
 		}
 		server.Close()
@@ -40,15 +44,15 @@ func TestStrictEnforcementApprovesThenConsumesOnlyOnce(t *testing.T) {
 }
 
 func TestStrictEnforcerFailsClosedBeforeAndAfterDecision(t *testing.T) {
-	for _, raw := range []string{`broken`, `{"decision":"ALLOW"}`, `{"decision":"ALLOW","outcome":"unknown"}`, `{"decision":"ALLOW","outcome":"verified","admission":null}`, `{"decision":"ALLOW","outcome":"verified","admission":false}`, `{"decision":"ALLOW","outcome":"verified","admission":{}}`} {
+	for _, raw := range []string{`broken`, `{"decision":"ALLOW","outcome":"verified"}`, `{"decision":"ALLOW"}`, `{"decision":"ALLOW","outcome":"unknown"}`, `{"decision":"ALLOW","outcome":"verified","admission":null}`, `{"decision":"ALLOW","outcome":"verified","admission":false}`, `{"decision":"ALLOW","outcome":"verified","admission":{}}`} {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write([]byte(raw)) }))
-		e := NewEnforcer(server.URL, "key", WithStrictAdmission())
+		e := NewEnforcer(server.URL, "key")
 		if allowed, _ := e.Enforce(context.Background(), "Read", nil); allowed {
 			t.Errorf("malformed response allowed: %s", raw)
 		}
 		server.Close()
 	}
-	e := NewEnforcer("http://127.0.0.1:1", "key", WithStrictAdmission())
+	e := NewEnforcer("http://127.0.0.1:1", "key")
 	if allowed, _ := e.Enforce(context.Background(), "Read", nil); allowed {
 		t.Fatal("outage allowed strict execution")
 	}
@@ -60,6 +64,7 @@ type quotaEnforcerServer struct {
 	paths    []string
 	consumes int
 	gate     bool
+	decision string
 }
 
 func (fixture *quotaEnforcerServer) serveHTTP(w http.ResponseWriter, r *http.Request) {
@@ -75,7 +80,7 @@ func (fixture *quotaEnforcerServer) serveHTTP(w http.ResponseWriter, r *http.Req
 		if request.AdmissionProtocol != admission.Protocol || request.RequestID != "call" {
 			fixture.t.Error("missing admission capability or retry identity")
 		}
-		verdict := Verdict{Decision: DecisionAllow, Outcome: "verified", Admission: &admission.Link{Required: true, Protocol: admission.Protocol, ProposalHash: strings.Repeat("a", 64), ReserveURL: "/reserve"}}
+		verdict := Verdict{Decision: fixture.decision, Outcome: "verified", Admission: &admission.Link{Required: true, Protocol: admission.Protocol, ProposalHash: strings.Repeat("a", 64), ReserveURL: "/reserve"}}
 		if fixture.gate {
 			verdict.Decision = DecisionGate
 			verdict.Approval = &Approval{StatusURL: "/approval"}
@@ -95,7 +100,7 @@ func (fixture *quotaEnforcerServer) serveHTTP(w http.ResponseWriter, r *http.Req
 			state = "consumed"
 			authorized = fixture.consumes == 1
 		}
-		if err := json.NewEncoder(w).Encode(map[string]any{"outcome": "verified", "execution_authorized": authorized, "consume_url": "/consume", "reservation": map[string]any{"request_id": "call", "state": state, "expires_at": 120, "window_start": 60, "window_end": 180, "revision_id": "revision"}}); err != nil {
+		if err := json.NewEncoder(w).Encode(map[string]any{"outcome": "verified", "execution_authorized": authorized, "consume_url": "/consume", "reservation": map[string]any{"request_id": "call", "state": state, "expires_at": 120, "policy_digest": strings.Repeat("a", 64)}}); err != nil {
 			fixture.t.Error(err)
 		}
 	default:

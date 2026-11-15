@@ -50,7 +50,11 @@ def test_block_verdict_with_auth_and_payload():
             "message": "BLOCKED: destructive SQL on production.",
         }
     )
-    enf = PolicyEnforcer(f"http://127.0.0.1:{port}", "sk-test-key")
+    enf = PolicyEnforcer(
+        f"http://127.0.0.1:{port}",
+        "sk-test-key",
+        tool_ids={"run_sql": "registered-sql", "wire_transfer": "registered-wire"},
+    )
     v = enf.decide("run_sql", {"database": "production", "sql": "DROP TABLE customers"})
     assert v["decision"] == "BLOCK"
     assert v["rule"] == "destructive_sql_pre"
@@ -59,9 +63,14 @@ def test_block_verdict_with_auth_and_payload():
     assert captured["body"]["tool_args"]["database"] == "production"
 
 
-def test_fails_open_when_backend_unreachable():
-    enf = PolicyEnforcer("http://127.0.0.1:1", "sk", timeout=0.5)
-    assert enf.decide("run_sql", {})["decision"] == "ALLOW"
+def test_fails_closed_when_backend_unreachable():
+    enf = PolicyEnforcer(
+        "http://127.0.0.1:1",
+        "sk",
+        timeout=0.5,
+        tool_ids={"run_sql": "registered-sql", "wire_transfer": "registered-wire"},
+    )
+    assert enf.decide("run_sql", {})["decision"] == "BLOCK"
 
 
 def test_from_env_requires_endpoint_and_key():
@@ -112,7 +121,11 @@ def _serve_gets(responses: list) -> tuple[int, list]:
 
 def test_await_gate_returns_approved_when_hold_resolves():
     port, log = _serve_gets([{"status": "approved", "decided_by": "a@b.c"}])
-    enf = PolicyEnforcer(f"http://127.0.0.1:{port}", "sk")
+    enf = PolicyEnforcer(
+        f"http://127.0.0.1:{port}",
+        "sk",
+        tool_ids={"run_sql": "registered-sql", "wire_transfer": "registered-wire"},
+    )
     assert (
         enf.await_gate({"status_url": "/api/v1/approvals/x"}, timeout=5) == "approved"
     )
@@ -124,30 +137,51 @@ def test_await_gate_polls_until_resolved():
     port, log = _serve_gets(
         [{"status": "pending"}, {"status": "pending"}, {"status": "approved"}]
     )
-    enf = PolicyEnforcer(f"http://127.0.0.1:{port}", "sk")
+    enf = PolicyEnforcer(
+        f"http://127.0.0.1:{port}",
+        "sk",
+        tool_ids={"run_sql": "registered-sql", "wire_transfer": "registered-wire"},
+    )
     assert enf.await_gate({"status_url": "/x"}, timeout=5) == "approved"
     assert len(log) >= 3
 
 
 def test_await_gate_returns_denied():
     port, _ = _serve_gets([{"status": "denied"}])
-    enf = PolicyEnforcer(f"http://127.0.0.1:{port}", "sk")
+    enf = PolicyEnforcer(
+        f"http://127.0.0.1:{port}",
+        "sk",
+        tool_ids={"run_sql": "registered-sql", "wire_transfer": "registered-wire"},
+    )
     assert enf.await_gate({"status_url": "/x"}, timeout=5) == "denied"
 
 
 def test_await_gate_fails_closed_without_status_url():
-    enf = PolicyEnforcer("http://127.0.0.1:1", "sk")
+    enf = PolicyEnforcer(
+        "http://127.0.0.1:1",
+        "sk",
+        tool_ids={"run_sql": "registered-sql", "wire_transfer": "registered-wire"},
+    )
     assert enf.await_gate({}) == "timeout"
 
 
 def test_await_gate_fails_closed_when_unreachable():
-    enf = PolicyEnforcer("http://127.0.0.1:1", "sk", timeout=0.3)
+    enf = PolicyEnforcer(
+        "http://127.0.0.1:1",
+        "sk",
+        timeout=0.3,
+        tool_ids={"run_sql": "registered-sql", "wire_transfer": "registered-wire"},
+    )
     assert enf.await_gate({"status_url": "/x"}, timeout=1) == "timeout"
 
 
 def test_decide_sends_caller_identity_when_given():
     port, captured = _serve_once({"decision": "ALLOW"})
-    enf = PolicyEnforcer(f"http://127.0.0.1:{port}", "sk-test-key")
+    enf = PolicyEnforcer(
+        f"http://127.0.0.1:{port}",
+        "sk-test-key",
+        tool_ids={"run_sql": "registered-sql", "wire_transfer": "registered-wire"},
+    )
     enf.decide(
         "run_sql",
         {"sql": "SELECT 1"},
@@ -163,7 +197,11 @@ def test_decide_sends_caller_identity_when_given():
 
 def test_decide_omits_identity_fields_when_absent():
     port, captured = _serve_once({"decision": "ALLOW"})
-    enf = PolicyEnforcer(f"http://127.0.0.1:{port}", "sk-test-key")
+    enf = PolicyEnforcer(
+        f"http://127.0.0.1:{port}",
+        "sk-test-key",
+        tool_ids={"run_sql": "registered-sql", "wire_transfer": "registered-wire"},
+    )
     enf.decide("run_sql", {})
     body = captured["body"]
     assert "agent_id" not in body
@@ -182,7 +220,11 @@ def test_decide_defaults_invocation_id_to_the_ambient_trace():
         return
     trace.set_tracer_provider(TracerProvider())
     port, captured = _serve_once({"decision": "ALLOW"})
-    enf = PolicyEnforcer(f"http://127.0.0.1:{port}", "sk-test-key")
+    enf = PolicyEnforcer(
+        f"http://127.0.0.1:{port}",
+        "sk-test-key",
+        tool_ids={"run_sql": "registered-sql", "wire_transfer": "registered-wire"},
+    )
     with trace.get_tracer(__name__).start_as_current_span("invocation") as span:
         want = format(span.get_span_context().trace_id, "032x")
         enf.decide("run_sql", {})
@@ -191,13 +233,20 @@ def test_decide_defaults_invocation_id_to_the_ambient_trace():
 
 class _FakeEnforcer:
     def __init__(self, verdict, gate_status="approved"):
-        self.verdict = verdict
+        self.verdict = {
+            "outcome": "verified",
+            "admission": {"fixture": True},
+            **verdict,
+        }
         self.gate_status = gate_status
         self.decide_kwargs = None
 
     def decide(self, tool_name, tool_args, **kwargs):
         self.decide_kwargs = {"tool_name": tool_name, "tool_args": tool_args, **kwargs}
         return self.verdict
+
+    def authorize_admission(self, verdict):
+        return True, ""
 
     def await_gate(self, approval):
         return self.gate_status
@@ -246,7 +295,7 @@ def test_enforce_gate_approved_allows():
 
 if __name__ == "__main__":
     test_block_verdict_with_auth_and_payload()
-    test_fails_open_when_backend_unreachable()
+    test_fails_closed_when_backend_unreachable()
     test_from_env_requires_endpoint_and_key()
     test_await_gate_returns_approved_when_hold_resolves()
     test_await_gate_polls_until_resolved()

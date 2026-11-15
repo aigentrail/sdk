@@ -14,7 +14,7 @@ import sys
 import threading
 import types
 from http.server import BaseHTTPRequestHandler, HTTPServer
-from types import SimpleNamespace
+from dataclasses import dataclass
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _PKG_DIR = os.path.join(_HERE, "..", "gentrail")
@@ -80,7 +80,7 @@ def _serve(verdict, gate_statuses=()):
         def do_POST(self):
             n = int(self.headers.get("Content-Length", 0))
             captured["body"] = json.loads(self.rfile.read(n))
-            self._send(verdict)
+            self._send({"outcome": "verified", **verdict})
 
         def do_GET(self):
             status = statuses[0] if len(statuses) == 1 else statuses.pop(0)
@@ -97,13 +97,20 @@ def _serve(verdict, gate_statuses=()):
 def _middleware_for(verdict, gate_statuses=(), agent_id="reporter"):
     srv, captured = _serve(verdict, gate_statuses)
     enf = enforcement.PolicyEnforcer(
-        f"http://127.0.0.1:{srv.server_address[1]}", "sk-test"
+        f"http://127.0.0.1:{srv.server_address[1]}",
+        "sk-test",
+        tool_ids={"run_sql": "registered-sql", "wire_transfer": "registered-wire"},
     )
     return adapter.enforcement_middleware(enf, agent_id=agent_id), captured, srv
 
 
+@dataclass
+class ToolCallRequest:
+    tool_call: dict
+
+
 def _request():
-    return SimpleNamespace(
+    return ToolCallRequest(
         tool_call={
             "name": "run_sql",
             "args": {"database": "production", "sql": "DROP TABLE customers"},
@@ -112,11 +119,12 @@ def _request():
     )
 
 
-def test_allow_calls_handler_and_sends_identity():
+def test_missing_admission_cancels_and_sends_identity():
     mw, captured, srv = _middleware_for({"decision": "ALLOW"})
     result = mw.wrap_tool_call(_request(), lambda request: "TOOL_RAN")
     srv.shutdown()
-    assert result == "TOOL_RAN"
+    assert isinstance(result, FakeToolMessage)
+    assert result.status == "error"
     body = captured["body"]
     assert body["tool_name"] == "run_sql"
     assert body["tool_args"]["database"] == "production"
@@ -143,7 +151,7 @@ def test_block_short_circuits_with_error_tool_message():
     assert result.name == "run_sql"
 
 
-def test_gate_approved_runs_tool_async():
+def test_gate_approval_without_admission_cancels_async():
     enforcement.GATE_POLL_INTERVAL_SECONDS = 0.01
 
     async def handler(request):
@@ -159,7 +167,8 @@ def test_gate_approved_runs_tool_async():
     )
     result = asyncio.run(mw.awrap_tool_call(_request(), handler))
     srv.shutdown()
-    assert result == "TOOL_RAN"
+    assert isinstance(result, FakeToolMessage)
+    assert result.status == "error"
 
 
 def test_gate_denied_cancels_sync():
@@ -220,7 +229,7 @@ def test_unconfigured_environment_raises():
                 os.environ[k] = val
 
 
-def test_strict_quota_configuration_survives_both_adapter_directions():
+def test_operation_admission_survives_both_adapter_directions():
     from test_admission import VECTORS, server, enforcer
 
     for asynchronous in (False, True):
@@ -247,17 +256,50 @@ def test_strict_quota_configuration_survives_both_adapter_directions():
             assert isinstance(result, FakeToolMessage)
             assert len(consumes) == 2
             assert all(
-                body["admission_protocol"] == "quota_v1"
+                body["admission_protocol"] == "operation_v1"
                 for path, body in calls
                 if path == "/api/v1/decide"
             )
 
 
+def test_authorized_request_snapshot_survives_mutation_sync_and_async():
+    from test_admission import VECTORS, server, enforcer
+
+    for asynchronous in (False, True):
+        request = _request()
+        request.tool_call["id"] = "call"
+
+        def change_original():
+            request.tool_call["args"]["database"] = "changed-database"
+
+        with server(VECTORS[0], before_consume=change_original) as (
+            endpoint,
+            calls,
+            consumes,
+        ):
+            middleware = adapter.enforcement_middleware(enforcer(endpoint))
+            if asynchronous:
+
+                async def handler(actual):
+                    return actual.tool_call["args"]["database"]
+
+                result = asyncio.run(middleware.awrap_tool_call(request, handler))
+            else:
+                result = middleware.wrap_tool_call(
+                    request, lambda actual: actual.tool_call["args"]["database"]
+                )
+            assert request.tool_call["args"]["database"] == "changed-database"
+            assert calls[0][1]["tool_args"]["database"] == "production"
+            assert result == "production"
+            assert len(consumes) == 1
+
+
 if __name__ == "__main__":
-    test_strict_quota_configuration_survives_both_adapter_directions()
-    test_allow_calls_handler_and_sends_identity()
+    test_authorized_request_snapshot_survives_mutation_sync_and_async()
+    test_operation_admission_survives_both_adapter_directions()
+    test_missing_admission_cancels_and_sends_identity()
     test_block_short_circuits_with_error_tool_message()
-    test_gate_approved_runs_tool_async()
+    test_gate_approval_without_admission_cancels_async()
     test_gate_denied_cancels_sync()
     test_gate_timeout_cancels_async()
     test_unconfigured_environment_raises()

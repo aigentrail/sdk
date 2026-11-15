@@ -1,11 +1,11 @@
 # gentrail (Go)
 
-Strict tool-call quotas use an agent-bound API key and explicit fail-closed
-enforcement:
+Operation enforcement uses an agent-bound API key and a registered tool ID:
 
 ```go
-enforcer := gentrail.NewEnforcer(endpoint, boundAgentKey, gentrail.WithStrictAdmission())
+enforcer := gentrail.NewEnforcer(endpoint, boundAgentKey)
 allowed, message := enforcer.Enforce(ctx, "issue_refund", args,
+    gentrail.WithToolID("registered-refund-operation"),
     gentrail.WithAgentID("billing-agent"), gentrail.WithRequestID(toolCallID))
 if !allowed {
     return errors.New(message)
@@ -13,25 +13,39 @@ if !allowed {
 return issueRefund(args)
 ```
 
-`Enforce` resolves policy and human approval, reserves capacity, and consumes the
-reservation once before returning permission. Initial decision outages also
-block in this mode. A retry with the same request ID cannot execute twice.
+`Enforce` resolves policy and every human approval, reserves an execution lease,
+and consumes it once before returning permission. This applies with or without
+a quota. Outages and missing admission deny execution. A retry with the same
+request ID cannot execute twice.
 Do not retry the tool because result reporting failed. A crash after consumption
 keeps the attempt charged. Low-level `Decide` and `AwaitGate` alone do not grant
-quota execution authority; use `Enforce` at the tool boundary.
+execution authority; use `Enforce` at the tool boundary.
+
+When changed policy requires re-evaluation, use a fresh `WithRequestID` and
+`WithParentRequestID(previousRequestID)` with the same registered tool and
+invocation. The new decision captures current policy and requires fresh
+approvals and admission. Linking decisions does not revoke the parent or copy
+its execution permission. The SDK does not automatically retry a consumed call.
+
+Low-level admission reports `admission.ErrAttemptClosed` for a bound consumed or
+canceled lease, and `admission.ErrConsumptionUncertain` when a consume reply
+cannot be confirmed. Both deny execution. Inspect the recorded attempt before
+starting another; a lost reply is not permission to repeat the tool. `Enforce`
+returns the corresponding recovery guidance without automatically retrying.
 
 The dependency-free `admission` package implements the same bounded protocol
 for host integrations. It rejects foreign links, redirects, stale or malformed
-receipts and lost consume replies. Constructors without `WithStrictAdmission`
-retain their existing outage policy and do not advertise strict quota support.
-Python and JavaScript implement the same protocol with their native strict
-admission options. See the [release notes](../RELEASE.md) for versions and rollout.
+receipts and lost consume replies. `operation_v1` receipts bind request identity,
+policy digest, state and a short deadline. They carry no quota-window dependency.
+Consumption may shorten a deadline, never renew it. The former opt-in constructor
+option and `quota_v1` execution protocol are removed. Deploy this client with the
+matching D3 backend; the Python and JavaScript client migrations remain pending.
 
 The Go governance SDK for Gentrail. It emits OpenTelemetry spans for agent
 invocations, LLM calls, and tool calls over OTLP/HTTP, enforces policy on tool
 calls before they run, and seals decision journals as evidence. Span shape,
-enforcement semantics, and journal hashes match the Python SDK; the shared
-vectors in `../spec` pin all three.
+journal hashes match the Python SDK; the shared vectors in `../spec` pin those
+contracts. Operation admission is being migrated separately.
 
 ## Install
 
@@ -120,7 +134,7 @@ the raw span.
 
 ```go
 allowed, message := g.Enforcer.Enforce(ctx, "issue_refund", args,
-	gentrail.WithAgentID("billing-agent"))
+	gentrail.WithToolID("registered-refund-operation"), gentrail.WithAgentID("billing-agent"))
 if !allowed {
 	if err := g.Tracer.RecordToolCall(ctx, gentrail.ToolCallParams{
 		AgentID:          "billing-agent",
@@ -135,12 +149,11 @@ if !allowed {
 }
 ```
 
-`Enforce` runs one decide-and-gate cycle. `BLOCK` returns `false` with the
-verdict message (or `"<decision> by policy <rule>"`). `GATE` waits up to the
-gate timeout (`GENTRAIL_GATE_TIMEOUT_SECONDS`, default 120) for a human
-approval: approved returns `true`; denied, expired, or unanswered returns
-`false` with `"<message> (approval <status>)"`. Anything else is allowed.
-`Decide` fails open on backend errors; `AwaitGate` fails closed.
+`Enforce` evaluates the proposal, waits for required approvals and consumes
+single-use admission before returning `true`. BLOCK, missing or unverified
+verdicts, unresolved gates and admission failures return `false`. `Decide` and
+`AwaitGate` alone never grant execution authority; backend failures keep the
+call blocked. Run the tool with the exact arguments passed to enforcement.
 
 Set `ToolCallParams.EnforcedDecision` to the verdict (`DecisionBlock` or
 `DecisionGate`) when recording a cancelled tool call; it is exported as

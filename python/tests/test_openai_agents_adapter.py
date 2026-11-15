@@ -83,7 +83,7 @@ def _serve(verdict, gate_statuses=()):
         def do_POST(self):
             n = int(self.headers.get("Content-Length", 0))
             captured["body"] = json.loads(self.rfile.read(n))
-            self._send(verdict)
+            self._send({"outcome": "verified", **verdict})
 
         def do_GET(self):
             status = statuses[0] if len(statuses) == 1 else statuses.pop(0)
@@ -100,7 +100,9 @@ def _serve(verdict, gate_statuses=()):
 def _guardrail_for(verdict, gate_statuses=()):
     srv, captured = _serve(verdict, gate_statuses)
     enf = enforcement.PolicyEnforcer(
-        f"http://127.0.0.1:{srv.server_address[1]}", "sk-test"
+        f"http://127.0.0.1:{srv.server_address[1]}",
+        "sk-test",
+        tool_ids={"run_sql": "registered-sql", "wire_transfer": "registered-wire"},
     )
     return adapter.enforcement_guardrail(enf), captured, srv
 
@@ -138,11 +140,11 @@ def test_call_facts_wraps_unparseable_arguments():
     assert agent == ""
 
 
-def test_allow_passes_through_and_sends_identity():
+def test_missing_admission_rejects_and_sends_identity():
     guardrail, captured, srv = _guardrail_for({"decision": "ALLOW"})
     out = _run(guardrail, _data())
     srv.shutdown()
-    assert out.behavior == "allow"
+    assert out.behavior == "reject_content"
     body = captured["body"]
     assert body["tool_name"] == "run_sql"
     assert body["tool_args"]["database"] == "production"
@@ -164,7 +166,7 @@ def test_block_rejects_with_rule_message():
     assert out.message == "BLOCKED: destructive SQL."
 
 
-def test_gate_approved_proceeds():
+def test_gate_approval_without_admission_rejects():
     enforcement.GATE_POLL_INTERVAL_SECONDS = 0.01
     guardrail, _, srv = _guardrail_for(
         {
@@ -176,7 +178,7 @@ def test_gate_approved_proceeds():
     )
     out = _run(guardrail, _data())
     srv.shutdown()
-    assert out.behavior == "allow"
+    assert out.behavior == "reject_content"
 
 
 def test_gate_denied_rejects():
@@ -207,7 +209,7 @@ def test_unconfigured_environment_raises():
                 os.environ[k] = val
 
 
-def test_strict_quota_guardrail_consumes_and_refuses_replay():
+def test_operation_guardrail_consumes_and_refuses_replay():
     from test_admission import VECTORS, server, enforcer
 
     with server(VECTORS[0]) as (endpoint, calls, consumes):
@@ -222,12 +224,12 @@ def test_strict_quota_guardrail_consumes_and_refuses_replay():
 
 
 if __name__ == "__main__":
-    test_strict_quota_guardrail_consumes_and_refuses_replay()
+    test_operation_guardrail_consumes_and_refuses_replay()
     test_call_facts_extracts_identity()
     test_call_facts_wraps_unparseable_arguments()
-    test_allow_passes_through_and_sends_identity()
+    test_missing_admission_rejects_and_sends_identity()
     test_block_rejects_with_rule_message()
-    test_gate_approved_proceeds()
+    test_gate_approval_without_admission_rejects()
     test_gate_denied_rejects()
     test_unconfigured_environment_raises()
     print("ALL PASS")

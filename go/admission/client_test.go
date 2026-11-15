@@ -3,6 +3,7 @@ package admission
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -11,6 +12,51 @@ import (
 	"testing"
 	"time"
 )
+
+func TestAdmissionReportsClosedAndUncertainAttemptsWithoutRetrying(t *testing.T) {
+	for _, scenario := range []string{"consumed", "released", "reply-lost", "reply-malformed"} {
+		t.Run(scenario, func(t *testing.T) {
+			var consumes atomic.Uint32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/consume" {
+					consumes.Add(1)
+					if scenario == "reply-lost" {
+						connection, _, err := w.(http.Hijacker).Hijack()
+						if err != nil {
+							t.Error(err)
+							return
+						}
+						if err := connection.Close(); err != nil {
+							t.Error(err)
+						}
+						return
+					}
+					if _, err := io.WriteString(w, `{}`); err != nil {
+						t.Error(err)
+					}
+					return
+				}
+				state := "reserved"
+				if scenario == "consumed" || scenario == "released" {
+					state = scenario
+				}
+				if err := json.NewEncoder(w).Encode(admissionReceipt{Outcome: "verified", ConsumeURL: "/consume", Reservation: admissionReservation{RequestID: "call", State: state, ExpiresAt: 120, PolicyDigest: strings.Repeat("a", 64)}}); err != nil {
+					t.Error(err)
+				}
+			}))
+			defer server.Close()
+			client := Client{DecideEndpoint: server.URL, HTTP: server.Client(), Now: func() time.Time { return time.Unix(100, 0) }}
+			err := client.Authorize(t.Context(), "call", Link{Required: true, Protocol: Protocol, ProposalHash: strings.Repeat("a", 64), ReserveURL: "/reserve"})
+			expected, count := ErrConsumptionUncertain, uint32(1)
+			if scenario == "consumed" || scenario == "released" {
+				expected, count = ErrAttemptClosed, 0
+			}
+			if !errors.Is(err, expected) || consumes.Load() != count {
+				t.Fatal("admission lost its recovery state or retried", err, consumes.Load())
+			}
+		})
+	}
+}
 
 func TestAdmissionRequiresConfirmedUnexpiredConsumption(t *testing.T) {
 	for _, test := range []struct {
@@ -22,8 +68,8 @@ func TestAdmissionRequiresConfirmedUnexpiredConsumption(t *testing.T) {
 		{"replayed", func(r *admissionReceipt) { r.ExecutionAuthorized = false }, false},
 		{"expired", func(r *admissionReceipt) { r.Reservation.ExpiresAt = 100 }, false},
 		{"foreign request", func(r *admissionReceipt) { r.Reservation.RequestID = "other" }, false},
-		{"revision changed", func(r *admissionReceipt) { r.Reservation.RevisionID = "other" }, false},
-		{"window changed", func(r *admissionReceipt) { r.Reservation.WindowEnd++ }, false},
+		{"policy changed", func(r *admissionReceipt) { r.Reservation.PolicyDigest = strings.Repeat("b", 64) }, false},
+		{"deadline extended", func(r *admissionReceipt) { r.Reservation.ExpiresAt++ }, false},
 		{"unknown outcome", func(r *admissionReceipt) { r.Outcome = "unknown" }, false},
 		{"not consumed", func(r *admissionReceipt) { r.Reservation.State = "reserved" }, false},
 	} {
@@ -38,7 +84,7 @@ func TestAdmissionRequiresConfirmedUnexpiredConsumption(t *testing.T) {
 				if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body["proposal_hash"] != strings.Repeat("a", 64) {
 					t.Error("proposal binding lost")
 				}
-				receipt := admissionReceipt{Outcome: "verified", ConsumeURL: "/consume", Reservation: admissionReservation{RequestID: "call", State: "reserved", ExpiresAt: 120, WindowStart: 60, WindowEnd: 180, RevisionID: "revision"}}
+				receipt := admissionReceipt{Outcome: "verified", ConsumeURL: "/consume", Reservation: admissionReservation{RequestID: "call", State: "reserved", ExpiresAt: 120, PolicyDigest: strings.Repeat("a", 64)}}
 				if r.URL.Path == "/consume" {
 					receipt.Reservation.State = "consumed"
 					receipt.ExecutionAuthorized = true
@@ -105,7 +151,7 @@ func TestAdmissionLostConsumeReplyNeverRetriesOrGrantsExecution(t *testing.T) {
 			}
 			return
 		}
-		receipt := admissionReceipt{Outcome: "verified", ConsumeURL: "/consume", Reservation: admissionReservation{RequestID: "call", State: "reserved", ExpiresAt: 120, WindowStart: 60, WindowEnd: 180, RevisionID: "revision"}}
+		receipt := admissionReceipt{Outcome: "verified", ConsumeURL: "/consume", Reservation: admissionReservation{RequestID: "call", State: "reserved", ExpiresAt: 120, PolicyDigest: strings.Repeat("a", 64)}}
 		if err := json.NewEncoder(w).Encode(receipt); err != nil {
 			t.Error(err)
 		}

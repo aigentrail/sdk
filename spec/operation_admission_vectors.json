@@ -1,0 +1,610 @@
+[
+  {
+    "name": "confirmed",
+    "link": {
+      "required": true,
+      "protocol": "operation_v1",
+      "proposal_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "reserve_url": "/reserve"
+    },
+    "reserved": {
+      "outcome": "verified",
+      "execution_authorized": false,
+      "consume_url": "/consume",
+      "reservation": {
+        "request_id": "call",
+        "state": "reserved",
+        "expires_at": 120,
+        "policy_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      }
+    },
+    "consumed": {
+      "outcome": "verified",
+      "execution_authorized": true,
+      "reservation": {
+        "request_id": "call",
+        "state": "consumed",
+        "expires_at": 120,
+        "policy_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      }
+    },
+    "allowed": true,
+    "requests": 2
+  },
+  {
+    "name": "replayed",
+    "link": {
+      "required": true,
+      "protocol": "operation_v1",
+      "proposal_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "reserve_url": "/reserve"
+    },
+    "reserved": {
+      "outcome": "verified",
+      "execution_authorized": false,
+      "consume_url": "/consume",
+      "reservation": {
+        "request_id": "call",
+        "state": "reserved",
+        "expires_at": 120,
+        "policy_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      }
+    },
+    "consumed": {
+      "outcome": "verified",
+      "execution_authorized": false,
+      "reservation": {
+        "request_id": "call",
+        "state": "consumed",
+        "expires_at": 120,
+        "policy_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      }
+    },
+    "allowed": false,
+    "requests": 2
+  },
+  {
+    "name": "foreign request",
+    "link": {
+      "required": true,
+      "protocol": "operation_v1",
+      "proposal_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "reserve_url": "/reserve"
+    },
+    "reserved": {
+      "outcome": "verified",
+      "execution_authorized": false,
+      "consume_url": "/consume",
+      "reservation": {
+        "request_id": "call",
+        "state": "reserved",
+        "expires_at": 120,
+        "policy_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      }
+    },
+    "consumed": {
+      "outcome": "verified",
+      "execution_authorized": true,
+      "reservation": {
+        "request_id": "other",
+        "state": "consumed",
+        "expires_at": 120,
+        "policy_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      }
+    },
+    "allowed": false,
+    "requests": 2
+  },
+  {
+    "name": "changed policy",
+    "link": {
+      "required": true,
+      "protocol": "operation_v1",
+      "proposal_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "reserve_url": "/reserve"
+    },
+    "reserved": {
+      "outcome": "verified",
+      "execution_authorized": false,
+      "consume_url": "/consume",
+      "reservation": {
+        "request_id": "call",
+        "state": "reserved",
+        "expires_at": 120,
+        "policy_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      }
+    },
+    "consumed": {
+      "outcome": "verified",
+      "execution_authorized": true,
+      "reservation": {
+        "request_id": "call",
+        "state": "consumed",
+        "expires_at": 120,
+        "policy_digest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+      }
+    },
+    "allowed": false,
+    "requests": 2
+  },
+  {
+    "name": "missing policy",
+    "link": {
+      "required": true,
+      "protocol": "operation_v1",
+      "proposal_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "reserve_url": "/reserve"
+    },
+    "reserved": {
+      "outcome": "verified",
+      "execution_authorized": false,
+      "consume_url": "/consume",
+      "reservation": {
+        "request_id": "call",
+        "state": "reserved",
+        "expires_at": 120,
+        "policy_digest": ""
+      }
+    },
+    "consumed": {
+      "outcome": "verified",
+      "execution_authorized": true,
+      "reservation": {
+        "request_id": "call",
+        "state": "consumed",
+        "expires_at": 120,
+        "policy_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      }
+    },
+    "allowed": false,
+    "requests": 1
+  },
+  {
+    "name": "expired reservation",
+    "link": {
+      "required": true,
+      "protocol": "operation_v1",
+      "proposal_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "reserve_url": "/reserve"
+    },
+    "reserved": {
+      "outcome": "verified",
+      "execution_authorized": false,
+      "consume_url": "/consume",
+      "reservation": {
+        "request_id": "call",
+        "state": "reserved",
+        "expires_at": 100,
+        "policy_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      }
+    },
+    "consumed": {
+      "outcome": "verified",
+      "execution_authorized": true,
+      "reservation": {
+        "request_id": "call",
+        "state": "consumed",
+        "expires_at": 120,
+        "policy_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      }
+    },
+    "allowed": false,
+    "requests": 1
+  },
+  {
+    "name": "expired consumption",
+    "link": {
+      "required": true,
+      "protocol": "operation_v1",
+      "proposal_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "reserve_url": "/reserve"
+    },
+    "reserved": {
+      "outcome": "verified",
+      "execution_authorized": false,
+      "consume_url": "/consume",
+      "reservation": {
+        "request_id": "call",
+        "state": "reserved",
+        "expires_at": 120,
+        "policy_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      }
+    },
+    "consumed": {
+      "outcome": "verified",
+      "execution_authorized": true,
+      "reservation": {
+        "request_id": "call",
+        "state": "consumed",
+        "expires_at": 100,
+        "policy_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      }
+    },
+    "allowed": false,
+    "requests": 2
+  },
+  {
+    "name": "overlong lease",
+    "link": {
+      "required": true,
+      "protocol": "operation_v1",
+      "proposal_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "reserve_url": "/reserve"
+    },
+    "reserved": {
+      "outcome": "verified",
+      "execution_authorized": false,
+      "consume_url": "/consume",
+      "reservation": {
+        "request_id": "call",
+        "state": "reserved",
+        "expires_at": 131,
+        "policy_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      }
+    },
+    "consumed": {
+      "outcome": "verified",
+      "execution_authorized": true,
+      "reservation": {
+        "request_id": "call",
+        "state": "consumed",
+        "expires_at": 120,
+        "policy_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      }
+    },
+    "allowed": false,
+    "requests": 1
+  },
+  {
+    "name": "extended lease",
+    "link": {
+      "required": true,
+      "protocol": "operation_v1",
+      "proposal_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "reserve_url": "/reserve"
+    },
+    "reserved": {
+      "outcome": "verified",
+      "execution_authorized": false,
+      "consume_url": "/consume",
+      "reservation": {
+        "request_id": "call",
+        "state": "reserved",
+        "expires_at": 120,
+        "policy_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      }
+    },
+    "consumed": {
+      "outcome": "verified",
+      "execution_authorized": true,
+      "reservation": {
+        "request_id": "call",
+        "state": "consumed",
+        "expires_at": 121,
+        "policy_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      }
+    },
+    "allowed": false,
+    "requests": 2
+  },
+  {
+    "name": "premature authority",
+    "link": {
+      "required": true,
+      "protocol": "operation_v1",
+      "proposal_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "reserve_url": "/reserve"
+    },
+    "reserved": {
+      "outcome": "verified",
+      "execution_authorized": true,
+      "consume_url": "/consume",
+      "reservation": {
+        "request_id": "call",
+        "state": "reserved",
+        "expires_at": 120,
+        "policy_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      }
+    },
+    "consumed": {
+      "outcome": "verified",
+      "execution_authorized": true,
+      "reservation": {
+        "request_id": "call",
+        "state": "consumed",
+        "expires_at": 120,
+        "policy_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      }
+    },
+    "allowed": false,
+    "requests": 1
+  },
+  {
+    "name": "not consumed",
+    "link": {
+      "required": true,
+      "protocol": "operation_v1",
+      "proposal_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "reserve_url": "/reserve"
+    },
+    "reserved": {
+      "outcome": "verified",
+      "execution_authorized": false,
+      "consume_url": "/consume",
+      "reservation": {
+        "request_id": "call",
+        "state": "reserved",
+        "expires_at": 120,
+        "policy_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      }
+    },
+    "consumed": {
+      "outcome": "verified",
+      "execution_authorized": true,
+      "reservation": {
+        "request_id": "call",
+        "state": "reserved",
+        "expires_at": 120,
+        "policy_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      }
+    },
+    "allowed": false,
+    "requests": 2
+  },
+  {
+    "name": "unknown outcome",
+    "link": {
+      "required": true,
+      "protocol": "operation_v1",
+      "proposal_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "reserve_url": "/reserve"
+    },
+    "reserved": {
+      "outcome": "verified",
+      "execution_authorized": false,
+      "consume_url": "/consume",
+      "reservation": {
+        "request_id": "call",
+        "state": "reserved",
+        "expires_at": 120,
+        "policy_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      }
+    },
+    "consumed": {
+      "outcome": "unknown",
+      "execution_authorized": true,
+      "reservation": {
+        "request_id": "call",
+        "state": "consumed",
+        "expires_at": 120,
+        "policy_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      }
+    },
+    "allowed": false,
+    "requests": 2
+  },
+  {
+    "name": "quota exhausted",
+    "link": {
+      "required": true,
+      "protocol": "operation_v1",
+      "proposal_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "reserve_url": "/reserve"
+    },
+    "reserved": {
+      "outcome": "quota_exhausted",
+      "execution_authorized": false,
+      "consume_url": "/consume",
+      "reservation": {
+        "request_id": "call",
+        "state": "reserved",
+        "expires_at": 120,
+        "policy_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      }
+    },
+    "consumed": {
+      "outcome": "verified",
+      "execution_authorized": true,
+      "reservation": {
+        "request_id": "call",
+        "state": "consumed",
+        "expires_at": 120,
+        "policy_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      }
+    },
+    "allowed": false,
+    "requests": 1
+  },
+  {
+    "name": "foreign reserve control",
+    "link": {
+      "required": true,
+      "protocol": "operation_v1",
+      "proposal_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "reserve_url": "https://foreign.invalid/reserve"
+    },
+    "reserved": {
+      "outcome": "verified",
+      "execution_authorized": false,
+      "consume_url": "/consume",
+      "reservation": {
+        "request_id": "call",
+        "state": "reserved",
+        "expires_at": 120,
+        "policy_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      }
+    },
+    "consumed": {
+      "outcome": "verified",
+      "execution_authorized": true,
+      "reservation": {
+        "request_id": "call",
+        "state": "consumed",
+        "expires_at": 120,
+        "policy_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      }
+    },
+    "allowed": false,
+    "requests": 0
+  },
+  {
+    "name": "foreign consume control",
+    "link": {
+      "required": true,
+      "protocol": "operation_v1",
+      "proposal_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "reserve_url": "/reserve"
+    },
+    "reserved": {
+      "outcome": "verified",
+      "execution_authorized": false,
+      "consume_url": "https://foreign.invalid/consume",
+      "reservation": {
+        "request_id": "call",
+        "state": "reserved",
+        "expires_at": 120,
+        "policy_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      }
+    },
+    "consumed": {
+      "outcome": "verified",
+      "execution_authorized": true,
+      "reservation": {
+        "request_id": "call",
+        "state": "consumed",
+        "expires_at": 120,
+        "policy_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      }
+    },
+    "allowed": false,
+    "requests": 1
+  },
+  {
+    "name": "retired protocol",
+    "link": {
+      "required": true,
+      "protocol": "quota_v1",
+      "proposal_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "reserve_url": "/reserve"
+    },
+    "reserved": {
+      "outcome": "verified",
+      "execution_authorized": false,
+      "consume_url": "/consume",
+      "reservation": {
+        "request_id": "call",
+        "state": "reserved",
+        "expires_at": 120,
+        "policy_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      }
+    },
+    "consumed": {
+      "outcome": "verified",
+      "execution_authorized": true,
+      "reservation": {
+        "request_id": "call",
+        "state": "consumed",
+        "expires_at": 120,
+        "policy_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      }
+    },
+    "allowed": false,
+    "requests": 0
+  },
+  {
+    "name": "missing mandatory admission",
+    "link": {
+      "required": false,
+      "protocol": "operation_v1",
+      "proposal_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "reserve_url": "/reserve"
+    },
+    "reserved": {
+      "outcome": "verified",
+      "execution_authorized": false,
+      "consume_url": "/consume",
+      "reservation": {
+        "request_id": "call",
+        "state": "reserved",
+        "expires_at": 120,
+        "policy_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      }
+    },
+    "consumed": {
+      "outcome": "verified",
+      "execution_authorized": true,
+      "reservation": {
+        "request_id": "call",
+        "state": "consumed",
+        "expires_at": 120,
+        "policy_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      }
+    },
+    "allowed": false,
+    "requests": 0
+  },
+  {
+    "name": "malformed proposal",
+    "link": {
+      "required": true,
+      "protocol": "operation_v1",
+      "proposal_hash": "invalid",
+      "reserve_url": "/reserve"
+    },
+    "reserved": {
+      "outcome": "verified",
+      "execution_authorized": false,
+      "consume_url": "/consume",
+      "reservation": {
+        "request_id": "call",
+        "state": "reserved",
+        "expires_at": 120,
+        "policy_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      }
+    },
+    "consumed": {
+      "outcome": "verified",
+      "execution_authorized": true,
+      "reservation": {
+        "request_id": "call",
+        "state": "consumed",
+        "expires_at": 120,
+        "policy_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      }
+    },
+    "allowed": false,
+    "requests": 0
+  },
+  {
+    "name": "shortened lease",
+    "link": {
+      "required": true,
+      "protocol": "operation_v1",
+      "proposal_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "reserve_url": "/reserve"
+    },
+    "reserved": {
+      "outcome": "verified",
+      "execution_authorized": false,
+      "consume_url": "/consume",
+      "reservation": {
+        "request_id": "call",
+        "state": "reserved",
+        "expires_at": 120,
+        "policy_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      }
+    },
+    "consumed": {
+      "outcome": "verified",
+      "execution_authorized": true,
+      "reservation": {
+        "request_id": "call",
+        "state": "consumed",
+        "expires_at": 119,
+        "policy_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      }
+    },
+    "allowed": true,
+    "requests": 2
+  }
+]

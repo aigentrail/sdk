@@ -74,7 +74,11 @@ def test_decide_block_verdict_with_auth_and_payload():
     port, captured = _serve_once(
         {"decision": "BLOCK", "rule": "destructive_sql_pre", "message": "BLOCKED."}
     )
-    enf = AsyncPolicyEnforcer(f"http://127.0.0.1:{port}", "sk-test-key")
+    enf = AsyncPolicyEnforcer(
+        f"http://127.0.0.1:{port}",
+        "sk-test-key",
+        tool_ids={"run_sql": "registered-sql", "wire_transfer": "registered-wire"},
+    )
     v = asyncio.run(enf.decide("run_sql", {"database": "production"}))
     assert v["decision"] == "BLOCK"
     assert v["rule"] == "destructive_sql_pre"
@@ -83,14 +87,23 @@ def test_decide_block_verdict_with_auth_and_payload():
     assert captured["body"]["tool_args"]["database"] == "production"
 
 
-def test_decide_fails_open_when_backend_unreachable():
-    enf = AsyncPolicyEnforcer("http://127.0.0.1:1", "sk", timeout=0.5)
-    assert asyncio.run(enf.decide("run_sql", {}))["decision"] == "ALLOW"
+def test_decide_fails_closed_when_backend_unreachable():
+    enf = AsyncPolicyEnforcer(
+        "http://127.0.0.1:1",
+        "sk",
+        timeout=0.5,
+        tool_ids={"run_sql": "registered-sql", "wire_transfer": "registered-wire"},
+    )
+    assert asyncio.run(enf.decide("run_sql", {}))["decision"] == "BLOCK"
 
 
 def test_decide_sends_caller_identity_when_given():
     port, captured = _serve_once({"decision": "ALLOW"})
-    enf = AsyncPolicyEnforcer(f"http://127.0.0.1:{port}", "sk")
+    enf = AsyncPolicyEnforcer(
+        f"http://127.0.0.1:{port}",
+        "sk",
+        tool_ids={"run_sql": "registered-sql", "wire_transfer": "registered-wire"},
+    )
     asyncio.run(
         enf.decide(
             "run_sql",
@@ -129,7 +142,11 @@ def test_await_gate_polls_until_approved():
     port, log = _serve_gets(
         [{"status": "pending"}, {"status": "pending"}, {"status": "approved"}]
     )
-    enf = AsyncPolicyEnforcer(f"http://127.0.0.1:{port}", "sk")
+    enf = AsyncPolicyEnforcer(
+        f"http://127.0.0.1:{port}",
+        "sk",
+        tool_ids={"run_sql": "registered-sql", "wire_transfer": "registered-wire"},
+    )
     status = asyncio.run(
         enf.await_gate({"status_url": "/api/v1/approvals/x"}, timeout=5)
     )
@@ -140,30 +157,47 @@ def test_await_gate_polls_until_approved():
 
 def test_await_gate_returns_denied():
     port, _ = _serve_gets([{"status": "denied"}])
-    enf = AsyncPolicyEnforcer(f"http://127.0.0.1:{port}", "sk")
+    enf = AsyncPolicyEnforcer(
+        f"http://127.0.0.1:{port}",
+        "sk",
+        tool_ids={"run_sql": "registered-sql", "wire_transfer": "registered-wire"},
+    )
     assert asyncio.run(enf.await_gate({"status_url": "/x"}, timeout=5)) == "denied"
 
 
 def test_await_gate_times_out_while_pending():
     _mod.GATE_POLL_INTERVAL_SECONDS = 0.01
     port, _ = _serve_gets([{"status": "pending"}])
-    enf = AsyncPolicyEnforcer(f"http://127.0.0.1:{port}", "sk")
+    enf = AsyncPolicyEnforcer(
+        f"http://127.0.0.1:{port}",
+        "sk",
+        tool_ids={"run_sql": "registered-sql", "wire_transfer": "registered-wire"},
+    )
     assert asyncio.run(enf.await_gate({"status_url": "/x"}, timeout=0.05)) == "timeout"
 
 
 def test_await_gate_fails_closed_without_status_url():
-    enf = AsyncPolicyEnforcer("http://127.0.0.1:1", "sk")
+    enf = AsyncPolicyEnforcer(
+        "http://127.0.0.1:1",
+        "sk",
+        tool_ids={"run_sql": "registered-sql", "wire_transfer": "registered-wire"},
+    )
     assert asyncio.run(enf.await_gate({})) == "timeout"
 
 
 def test_await_gate_fails_closed_when_unreachable():
-    enf = AsyncPolicyEnforcer("http://127.0.0.1:1", "sk", timeout=0.3)
+    enf = AsyncPolicyEnforcer(
+        "http://127.0.0.1:1",
+        "sk",
+        timeout=0.3,
+        tool_ids={"run_sql": "registered-sql", "wire_transfer": "registered-wire"},
+    )
     assert asyncio.run(enf.await_gate({"status_url": "/x"}, timeout=1)) == "timeout"
 
 
 if __name__ == "__main__":
     test_decide_block_verdict_with_auth_and_payload()
-    test_decide_fails_open_when_backend_unreachable()
+    test_decide_fails_closed_when_backend_unreachable()
     test_decide_sends_caller_identity_when_given()
     test_from_env_requires_endpoint_and_key()
     test_await_gate_polls_until_approved()

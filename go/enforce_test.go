@@ -44,6 +44,8 @@ func TestDecideSendsPayloadIdentityAndHeaders(t *testing.T) {
 		WithAgentID("agent-reporter"),
 		WithInvocationID("0af7651916cd43dd8448eb211c80319c"),
 		WithRequestID("tooluse_abc123"),
+		WithParentRequestID("previous-attempt"),
+		WithToolID("registered-run-sql"),
 	)
 
 	if v.Decision != DecisionBlock || v.Rule != "destructive_sql_pre" {
@@ -59,11 +61,13 @@ func TestDecideSendsPayloadIdentityAndHeaders(t *testing.T) {
 		t.Errorf("user-agent = %q", gotAgent)
 	}
 	want := map[string]any{
-		"event_type":    "tool_call",
-		"tool_name":     "run_sql",
-		"agent_id":      "agent-reporter",
-		"invocation_id": "0af7651916cd43dd8448eb211c80319c",
-		"request_id":    "tooluse_abc123",
+		"event_type":        "tool_call",
+		"tool_name":         "run_sql",
+		"tool_id":           "registered-run-sql",
+		"agent_id":          "agent-reporter",
+		"invocation_id":     "0af7651916cd43dd8448eb211c80319c",
+		"request_id":        "tooluse_abc123",
+		"parent_request_id": "previous-attempt",
 	}
 	for k, wv := range want {
 		if gotBody[k] != wv {
@@ -99,22 +103,22 @@ func TestDecideOmitsIdentityFieldsWhenAbsent(t *testing.T) {
 	}
 }
 
-func TestDecideFailsOpenWhenUnreachable(t *testing.T) {
+func TestDecideFailsClosedWhenUnreachable(t *testing.T) {
 	v := newTestEnforcer("http://127.0.0.1:1").Decide(context.Background(), "run_sql", nil)
-	if v.Decision != DecisionAllow {
-		t.Errorf("decision = %q, want ALLOW on transport error", v.Decision)
+	if v.Decision != DecisionBlock {
+		t.Errorf("decision = %q, want BLOCK on transport error", v.Decision)
 	}
 }
 
-func TestDecideFailsOpenOnBackendError(t *testing.T) {
+func TestDecideFailsClosedOnBackendError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "forbidden", http.StatusForbidden)
 	}))
 	defer srv.Close()
 
 	v := newTestEnforcer(srv.URL).Decide(context.Background(), "run_sql", nil)
-	if v.Decision != DecisionAllow {
-		t.Errorf("decision = %q, want ALLOW on backend error", v.Decision)
+	if v.Decision != DecisionBlock {
+		t.Errorf("decision = %q, want BLOCK on backend error", v.Decision)
 	}
 }
 
@@ -312,7 +316,7 @@ func newEnforceVectorServer(t *testing.T, vector enforceVector) *httptest.Server
 	}))
 }
 
-func TestEnforceMatchesSharedVectors(t *testing.T) {
+func TestLegacyEnforcementVectorsCannotAuthorizeWithoutAdmission(t *testing.T) {
 	for _, vector := range loadEnforceVectors(t) {
 		t.Run(vector.Name, func(t *testing.T) {
 			srv := newEnforceVectorServer(t, vector)
@@ -323,8 +327,8 @@ func TestEnforceMatchesSharedVectors(t *testing.T) {
 			allowed, message := enforcer.Enforce(context.Background(), "wire_funds", map[string]any{"amount": 10},
 				WithAgentID("agent-1"), WithRequestID("req-1"))
 
-			if allowed != vector.Allowed || message != vector.Message {
-				t.Errorf("Enforce = (%v, %q), want (%v, %q)", allowed, message, vector.Allowed, vector.Message)
+			if allowed {
+				t.Errorf("legacy response authorized execution: %q", message)
 			}
 		})
 	}
@@ -333,7 +337,7 @@ func TestEnforceMatchesSharedVectors(t *testing.T) {
 func TestEnforceGateWaitsForTheConfiguredTimeout(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/v1/decide" {
-			json.NewEncoder(w).Encode(Verdict{Decision: DecisionGate, Rule: "r", Approval: &Approval{StatusURL: "/hold"}})
+			json.NewEncoder(w).Encode(Verdict{Decision: DecisionGate, Outcome: "verified", Rule: "r", Approval: &Approval{StatusURL: "/hold"}})
 			return
 		}
 		json.NewEncoder(w).Encode(map[string]string{"status": "pending"})
@@ -356,7 +360,7 @@ func TestNilEnforcerEnforceAllows(t *testing.T) {
 	}
 }
 
-func TestUnavailableOutcomePreservesPermission(t *testing.T) {
+func TestUnavailableOutcomeNeverAuthorizes(t *testing.T) {
 	for _, decision := range []string{DecisionAllow, DecisionBlock, DecisionGate} {
 		t.Run(string(decision), func(t *testing.T) {
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -366,18 +370,18 @@ func TestUnavailableOutcomePreservesPermission(t *testing.T) {
 			}))
 			defer srv.Close()
 			verdict := newTestEnforcer(srv.URL).Decide(context.Background(), "send", nil)
-			if verdict.Decision != decision || verdict.Outcome != "unavailable" || verdict.Reference != nil {
+			if verdict.Decision != DecisionBlock || verdict.Outcome != "unavailable" || verdict.Reference != nil {
 				t.Fatalf("verdict = %+v", verdict)
 			}
 		})
 	}
 	verdict := newTestEnforcer("http://127.0.0.1:1").Decide(context.Background(), "send", nil)
-	if verdict.Decision != DecisionAllow || verdict.Outcome != "unavailable" || verdict.Reference != nil {
+	if verdict.Decision != DecisionBlock || verdict.Outcome != "unavailable" || verdict.Reference != nil {
 		t.Fatalf("unreachable verdict = %+v", verdict)
 	}
 }
 
-func TestMalformedReceiptMetadataNeverChangesPermission(t *testing.T) {
+func TestMalformedReceiptMetadataNeverAuthorizes(t *testing.T) {
 	for _, metadata := range []map[string]any{
 		{"outcome": "verified", "observation_reference": map[string]any{"request_id": 123}},
 		{"outcome": []string{"verified"}, "observation_reference": "invalid"},
@@ -390,10 +394,12 @@ func TestMalformedReceiptMetadataNeverChangesPermission(t *testing.T) {
 					t.Error(err)
 				}
 			}))
-			verdict := newTestEnforcer(srv.URL).Decide(context.Background(), "send", nil, WithRequestID("request"), WithInvocationID("inv"))
+			enforcer := newTestEnforcer(srv.URL)
+			verdict := enforcer.Decide(context.Background(), "send", nil, WithRequestID("request"), WithInvocationID("inv"))
+			allowed, _ := enforcer.Enforce(context.Background(), "send", nil, WithRequestID("request"), WithInvocationID("inv"))
 			srv.Close()
-			if verdict.Decision != decision || verdict.Reference != nil {
-				t.Fatalf("metadata changed permission: %+v", verdict)
+			if allowed || verdict.Reference != nil {
+				t.Fatalf("malformed metadata authorized execution: %+v", verdict)
 			}
 		}
 	}

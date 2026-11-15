@@ -7,7 +7,7 @@ governance:
     from agents import function_tool
     from gentrail.openai_agents import enforcement_guardrail
 
-    @function_tool(tool_input_guardrails=[enforcement_guardrail()])
+    @function_tool(tool_input_guardrails=[enforcement_guardrail(enforcer)])
     def run_sql(database: str, sql: str) -> str: ...
 
 BLOCK maps to ToolGuardrailFunctionOutput.reject_content: the tool never
