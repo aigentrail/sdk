@@ -1,15 +1,15 @@
-export const ADMISSION_PROTOCOL = "quota_v1";
+export const ADMISSION_PROTOCOL = "operation_v1";
 const RESPONSE_SIZE_MAX = 65536;
 
 export class QuotaExhaustedError extends Error {}
+export class AttemptClosedError extends Error {}
+export class ConsumptionUncertainError extends Error {}
 
 interface Reservation {
   request_id: string;
   state: string;
-  revision_id: string;
-  window_start: number;
+  policy_digest: string;
   expires_at: number;
-  window_end: number;
 }
 
 export function sameOriginLink(endpoint: string, link: unknown): string {
@@ -105,27 +105,51 @@ export class AdmissionClient {
     if (reserved.outcome === "quota_exhausted") {
       throw new QuotaExhaustedError("tool-call allowance exhausted");
     }
-    const expected = this.checkedReceipt(reserved, requestId, "reserved");
     if (
-      reserved.execution_authorized !== undefined &&
-      reserved.execution_authorized !== false
+      reserved.outcome === "verified" &&
+      reserved.execution_authorized === false
     ) {
+      for (const state of ["consumed", "released"]) {
+        if (
+          isRecord(reserved.reservation) &&
+          reserved.reservation.state === state
+        ) {
+          this.checkedReceipt(reserved, requestId, state);
+          throw new AttemptClosedError("attempt already consumed or canceled");
+        }
+      }
+    }
+    const expected = this.checkedReceipt(reserved, requestId, "reserved");
+    if (reserved.execution_authorized !== false) {
       throw new Error("reservation cannot authorize execution");
     }
-    const consumed = await this.exchange(
-      reserved.consume_url,
-      link.proposal_hash,
-      signal,
-    );
-    const actual = this.checkedReceipt(consumed, requestId, "consumed");
-    if (
-      consumed.execution_authorized !== true ||
-      JSON.stringify(actual) !==
-        JSON.stringify({ ...expected, state: "consumed" })
-    ) {
-      throw new Error("execution was not authorized");
+    try {
+      const consumed = await this.exchange(
+        reserved.consume_url,
+        link.proposal_hash,
+        signal,
+      );
+      const actual = this.checkedReceipt(consumed, requestId, "consumed");
+      const sameReservation =
+        actual.request_id === expected.request_id &&
+        actual.policy_digest === expected.policy_digest &&
+        actual.expires_at <= expected.expires_at;
+      if (sameReservation && consumed.execution_authorized === false) {
+        throw new AttemptClosedError("attempt already consumed or canceled");
+      }
+      if (!sameReservation || consumed.execution_authorized !== true) {
+        throw new Error("execution was not authorized");
+      }
+      signal.throwIfAborted();
+    } catch (error) {
+      if (error instanceof AttemptClosedError) {
+        throw error;
+      }
+      throw new ConsumptionUncertainError(
+        "consumption could not be confirmed",
+        { cause: error },
+      );
     }
-    signal.throwIfAborted();
   }
 
   private checkedReceipt(
@@ -140,35 +164,24 @@ export class AdmissionClient {
     if (
       reservation.request_id !== requestId ||
       reservation.state !== state ||
-      typeof reservation.revision_id !== "string" ||
-      !reservation.revision_id
+      typeof reservation.policy_digest !== "string" ||
+      !/^[a-fA-F0-9]{64}$/.test(reservation.policy_digest)
     ) {
       throw new Error("admission identity mismatch");
     }
-    const { window_start, expires_at, window_end } = reservation;
-    if (
-      typeof window_start !== "number" ||
-      typeof expires_at !== "number" ||
-      typeof window_end !== "number"
-    ) {
-      throw new Error("invalid admission timestamps");
-    }
-    if (![window_start, expires_at, window_end].every(Number.isSafeInteger)) {
-      throw new Error("invalid admission timestamps");
+    const expires_at = reservation.expires_at;
+    if (typeof expires_at !== "number" || !Number.isSafeInteger(expires_at)) {
+      throw new Error("invalid admission expiry");
     }
     const now = Math.floor(this.now() / 1000);
-    if (
-      !(window_start <= now && now < expires_at && expires_at <= window_end)
-    ) {
-      throw new Error("expired or invalid admission window");
+    if (!(now > 0 && now < expires_at && expires_at - now <= 30)) {
+      throw new Error("expired or invalid admission lease");
     }
     return {
       request_id: requestId,
       state,
-      revision_id: reservation.revision_id,
-      window_start,
+      policy_digest: reservation.policy_digest,
       expires_at,
-      window_end,
     };
   }
 

@@ -18,7 +18,7 @@ package.__path__ = [str(ROOT / "python/gentrail")]
 sys.modules["gentrail"] = package
 enforcement = importlib.import_module("gentrail.enforcement")
 admission = importlib.import_module("gentrail.admission")
-VECTORS = json.loads((ROOT / "spec/admission_vectors.json").read_text())
+VECTORS = json.loads((ROOT / "spec/operation_admission_vectors.json").read_text())
 
 
 @contextmanager
@@ -123,8 +123,9 @@ def test_shared_admission_vectors_sync_and_async():
                         message
                         == "This agent has used its tool-call allowance for the current quota window."
                     )
-                assert calls[0][1]["admission_protocol"] == "quota_v1"
+                assert calls[0][1]["admission_protocol"] == "operation_v1"
                 assert len(consumes) <= 1
+                assert len(calls) - 1 == vector["requests"], vector["name"]
 
 
 def test_gate_precedes_reservation_and_denial_never_consumes():
@@ -243,6 +244,31 @@ def test_strict_environment_setup_cannot_silently_disable_enforcement():
         for name, value in saved.items():
             if value is not None:
                 os.environ[name] = value
+
+
+def test_recovery_errors_distinguish_closed_and_uncertain_without_retry():
+    for mode in ("replay", "lost", "consumed", "released"):
+        vector = copy.deepcopy(VECTORS[0])
+        if mode == "replay":
+            vector["consumed"]["execution_authorized"] = False
+        if mode in ("consumed", "released"):
+            vector["reserved"]["reservation"]["state"] = mode
+        with server(vector, lost=mode == "lost") as (endpoint, calls, consumes):
+            client = admission.AdmissionClient(
+                endpoint + "/api/v1/decide", "key", 3, clock=lambda: 100
+            )
+            expected = (
+                admission.ConsumptionUncertainError
+                if mode == "lost"
+                else admission.AttemptClosedError
+            )
+            try:
+                client.authorize("call", vector["link"])
+            except expected:
+                pass
+            else:
+                raise AssertionError("attempt did not preserve its recovery state")
+            assert len(consumes) == (0 if mode in ("consumed", "released") else 1)
 
 
 if __name__ == "__main__":

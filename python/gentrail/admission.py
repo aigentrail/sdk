@@ -11,12 +11,20 @@ from contextlib import suppress
 from typing import Any, Callable
 from urllib.parse import urljoin, urlsplit
 
-PROTOCOL = "quota_v1"
+PROTOCOL = "operation_v1"
 BODY_SIZE_MAX = 65536
 DEADLINE_SECONDS = 9.0
 
 
 class QuotaExhaustedError(ValueError):
+    pass
+
+
+class AttemptClosedError(ValueError):
+    pass
+
+
+class ConsumptionUncertainError(ValueError):
     pass
 
 
@@ -83,19 +91,45 @@ class AdmissionClient:
             )
             if reserved.get("outcome") == "quota_exhausted":
                 raise QuotaExhaustedError("tool-call allowance exhausted")
+            if (
+                reserved.get("outcome") == "verified"
+                and reserved.get("execution_authorized") is False
+            ):
+                reservation = reserved.get("reservation")
+                if isinstance(reservation, dict) and reservation.get("state") in (
+                    "consumed",
+                    "released",
+                ):
+                    self.checked_receipt(reserved, request_id, reservation["state"])
+                    raise AttemptClosedError("attempt already consumed or canceled")
             expected = self.checked_receipt(reserved, request_id, "reserved")
-            if reserved.get("execution_authorized", False) is not False:
+            if reserved.get("execution_authorized") is not False:
                 raise ValueError("reservation cannot authorize execution")
-            consumed = self.exchange(
-                connection, reserved.get("consume_url"), digest, deadline
-            )
-            actual = self.checked_receipt(consumed, request_id, "consumed")
-            if consumed.get("execution_authorized") is not True:
-                raise ValueError("execution was not authorized")
-            if actual != {**expected, "state": "consumed"}:
-                raise ValueError("reservation changed during consumption")
-            if self.monotonic() >= deadline:
-                raise TimeoutError("admission deadline exceeded")
+            try:
+                consumed = self.exchange(
+                    connection, reserved.get("consume_url"), digest, deadline
+                )
+                actual = self.checked_receipt(consumed, request_id, "consumed")
+                same_reservation = (
+                    actual["request_id"] == expected["request_id"]
+                    and actual["policy_digest"] == expected["policy_digest"]
+                    and actual["expires_at"] <= expected["expires_at"]
+                )
+                if same_reservation and consumed.get("execution_authorized") is False:
+                    raise AttemptClosedError("attempt already consumed or canceled")
+                if (
+                    not same_reservation
+                    or consumed.get("execution_authorized") is not True
+                ):
+                    raise ValueError("execution was not authorized")
+                if self.monotonic() >= deadline:
+                    raise TimeoutError("admission deadline exceeded")
+            except AttemptClosedError:
+                raise
+            except Exception as error:
+                raise ConsumptionUncertainError(
+                    "consumption could not be confirmed"
+                ) from error
         finally:
             connection.close()
 
@@ -108,28 +142,20 @@ class AdmissionClient:
             or reservation.get("state") != state
         ):
             raise ValueError("admission identity mismatch")
-        revision = reservation.get("revision_id")
-        if not isinstance(revision, str) or not revision:
-            raise ValueError("missing admission revision")
-        times = [
-            reservation.get(key) for key in ("window_start", "expires_at", "window_end")
-        ]
-        if any(type(value) is not int for value in times):
-            raise ValueError("invalid admission timestamps")
-        start, expiry, end = times
+        policy_digest = reservation.get("policy_digest")
+        if not isinstance(policy_digest, str) or len(policy_digest) != 64:
+            raise ValueError("invalid admission policy digest")
+        if len(bytes.fromhex(policy_digest)) != 32:
+            raise ValueError("invalid admission policy digest")
+        expiry = reservation.get("expires_at")
+        if type(expiry) is not int:
+            raise ValueError("invalid admission expiry")
         now = math.floor(self.clock())
-        if not start <= now < expiry <= end:
-            raise ValueError("expired or invalid admission window")
+        if not 0 < now < expiry or expiry - now > 30:
+            raise ValueError("expired or invalid admission lease")
         return {
             key: reservation[key]
-            for key in (
-                "request_id",
-                "state",
-                "revision_id",
-                "window_start",
-                "expires_at",
-                "window_end",
-            )
+            for key in ("request_id", "state", "policy_digest", "expires_at")
         }
 
     def exchange(

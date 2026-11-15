@@ -3,7 +3,12 @@ import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import test from "node:test";
 import { PolicyEnforcer, guardTools } from "../src/index.js";
-import { AdmissionClient, boundedJson } from "../src/admission.js";
+import {
+  AdmissionClient,
+  AttemptClosedError,
+  ConsumptionUncertainError,
+  boundedJson,
+} from "../src/admission.js";
 import { readSpecJson, withEnv } from "./support.js";
 
 interface Vector {
@@ -12,8 +17,9 @@ interface Vector {
   reserved: Record<string, unknown>;
   consumed: Record<string, unknown>;
   allowed: boolean;
+  requests: number;
 }
-const vectors = readSpecJson("admission_vectors.json") as Vector[];
+const vectors = readSpecJson("operation_admission_vectors.json") as Vector[];
 
 async function quotaServer(
   options: {
@@ -32,7 +38,7 @@ async function quotaServer(
     for (const receipt of [vector.reserved, vector.consumed]) {
       Object.assign(receipt.reservation as object, {
         window_start: now - 10,
-        expires_at: now + 60,
+        expires_at: now + 20,
         window_end: now + 120,
       });
     }
@@ -134,8 +140,9 @@ test("strict admission matches every shared Go/Python receipt vector", async () 
           "This agent has used its tool-call allowance for the current quota window.",
         );
       }
-      assert.equal(srv.calls[0].body.admission_protocol, "quota_v1");
+      assert.equal(srv.calls[0].body.admission_protocol, "operation_v1");
       assert.ok(srv.consumes <= 1);
+      assert.equal(srv.calls.length - 1, vector.requests, vector.name);
     } finally {
       await srv.close();
     }
@@ -305,4 +312,35 @@ test("admission receipt sizes and stalled responses are bounded", async () => {
     await slow.close();
   }
   await assert.rejects(boundedJson(new Response("x".repeat(65)), 64));
+});
+
+test("closed and uncertain attempts have distinct recovery errors without retry", async () => {
+  for (const mode of ["replay", "lost", "consumed", "released"]) {
+    const vector = structuredClone(vectors[0]);
+    if (mode === "replay") {
+      vector.consumed.execution_authorized = false;
+    }
+    if (mode === "consumed" || mode === "released") {
+      (vector.reserved.reservation as Record<string, unknown>).state = mode;
+    }
+    const srv = await quotaServer({ vector, lost: mode === "lost" });
+    try {
+      const admission = new AdmissionClient(
+        srv.endpoint + "/api/v1/decide",
+        "key",
+        3000,
+        () => 100000,
+      );
+      await assert.rejects(
+        admission.authorize("call", vector.link),
+        mode === "lost" ? ConsumptionUncertainError : AttemptClosedError,
+      );
+      assert.equal(
+        srv.consumes,
+        mode === "consumed" || mode === "released" ? 0 : 1,
+      );
+    } finally {
+      await srv.close();
+    }
+  }
 });
