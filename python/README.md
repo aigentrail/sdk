@@ -7,17 +7,19 @@ executes.
 A Go SDK with the same span shape lives in [`../go/`](../go/) (`go get
 github.com/aigentrail/sdk/go`).
 
-## Strict tool-call quotas
+## Operation admission
 
-Available in the 0.8.0 release set. See [release preparation](../RELEASE.md)
-for package verification and rollout.
-
-Use an agent-bound API key and opt into fail-closed enforcement:
+The unreleased D3 SDK requires an agent-bound API key and registered tool IDs.
+See [release preparation](../RELEASE.md) for qualification and rollout.
 
 ```python
 from gentrail.enforcement import PolicyEnforcer, enforce
 
-enforcer = PolicyEnforcer(endpoint, bound_agent_key, strict_admission=True)
+enforcer = PolicyEnforcer(
+    endpoint,
+    bound_agent_key,
+    tool_ids={"issue_refund": registered_refund_tool_id},
+)
 allowed, message = enforce(
     enforcer, "issue_refund", arguments,
     agent_id="billing-agent", request_id=tool_call_id,
@@ -27,27 +29,34 @@ if not allowed:
 result = issue_refund(**arguments)
 ```
 
-`AsyncPolicyEnforcer(..., strict_admission=True)` with `enforce_async` has the
-same behavior. `PolicyEnforcer.from_env(strict_admission=True)` reads the
-existing endpoint and key variables. Pass this enforcer to
-`GentrailGovernanceHook(enforcer=...)`, `enforcement_middleware(enforcer=...)`,
-or `enforcement_guardrail(enforcer=...)`; adapter sync/async conversion retains
-its strict setting, deadlines, clock and identity generator.
+`AsyncPolicyEnforcer` and `enforce_async` use the same contract. Configured
+enforcement always fails closed and requires admission for every executable
+operation, including those without quotas. Missing mappings block before a
+decision request. You can instead pass `tool_id` explicitly to `decide` or
+`enforce`. Mappings are copied at configuration time and limited to 128 entries.
 
-Enforcement resolves approval first, then reserves and consumes once immediately
-before returning permission to run. Unknown outcomes, outages, malformed or
-expired receipts, foreign links, redirects and lost consume responses block the
-call. A repeated request ID cannot reuse a consumed grant. Consumption remains
-charged after a tool failure, host refusal or crash. Execution and reporting
-remain separate; never retry execution because result reporting failed.
+Pass the configured enforcer to `GentrailGovernanceHook(enforcer=...)`,
+`enforcement_middleware(enforcer=...)` or `enforcement_guardrail(enforcer=...)`.
+Sync/async conversion preserves its mappings, deadlines, clock and identity
+generator. `from_env()` reads endpoint/key configuration; a returned enforcer
+still requires explicit tool IDs before it can authorize execution.
 
-Low-level `decide` and `await_gate` are policy reads and do not grant quota
-execution authority. Use `enforce` or a framework adapter at the tool boundary.
-The admission exchange uses the existing `quota_v1` server controls, a shared
-nine-second budget, at most three seconds per network operation and 64 KiB
-receipt limits. It never retries consume. No quota means no reservation requests.
-Constructors without strict opt-in retain their existing fail-open decision
-behavior, while an admission resource always requires explicit strict support.
+Enforcement resolves every required approval, then reserves and consumes one
+policy-bound lease before returning permission to run. Unknown outcomes,
+outages, missing admission, malformed or expired receipts, foreign links,
+redirects and lost consume responses block the call. Low-level `decide` and
+`await_gate` do not grant execution authority.
+
+A repeated request ID cannot reuse a consumed grant. Closed and uncertain
+attempts return different recovery guidance. Never retry execution automatically
+after a lost consume reply or failed evidence report; check the attempt's outcome
+first. Consumption remains charged after a tool failure, host refusal or crash.
+For fresh evaluation, use a new `request_id` and set `parent_request_id` to the
+earlier request. The new decision does not inherit approvals.
+
+Admission uses `operation_v1` controls, a nine-second total budget, at most three
+seconds per network operation, a 30-second lease limit and 64 KiB receipt limits.
+Consume is never retried. Approval status responses are also limited to 64 KiB.
 
 ## Quickstart
 
@@ -227,7 +236,7 @@ python3 tests/test_parity_spec.py
 
 `PolicyEnforcer.decide()` and `AsyncPolicyEnforcer.decide()` return an explicit
 `outcome`: `verified`, `request_conflict`, or `unavailable`. A transport failure
-still follows the existing fail-open behavior, with `outcome="unavailable"`.
+returns `BLOCK` with `outcome="unavailable"`.
 `BLOCK` and unresolved `GATE` decisions retain their enforcement behavior.
 
 A verified, attributed response can include an immutable `DecisionReference` in

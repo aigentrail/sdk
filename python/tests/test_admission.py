@@ -98,7 +98,11 @@ def enforcer(endpoint, **options):
     return enforcement.PolicyEnforcer(
         endpoint,
         "key",
-        strict_admission=True,
+        tool_ids={
+            "Read": "registered-read",
+            "run_sql": "registered-sql",
+            "send": "registered-send",
+        },
         clock=lambda: 100,
         id_gen=lambda: "call",
         **options,
@@ -176,7 +180,7 @@ def test_strict_outage_and_malformed_resources_fail_closed():
     with server(VECTORS[0]) as (endpoint, calls, consumes):
         ordinary = enforcement.PolicyEnforcer(endpoint, "key")
         assert not enforcement.enforce(ordinary, "Read", {})[0]
-        assert "admission_protocol" not in calls[0][1]
+        assert calls == []
         assert not consumes
 
 
@@ -206,7 +210,7 @@ def test_slow_receipt_is_interrupted_at_total_deadline():
         admission.DEADLINE_SECONDS = previous
 
 
-def test_strict_decision_metadata_and_no_quota_behavior():
+def test_mandatory_decision_metadata_and_admission_behavior():
     for verdict in (
         {},
         {"decision": "ALLOW"},
@@ -224,22 +228,17 @@ def test_strict_decision_metadata_and_no_quota_behavior():
     with server(
         VECTORS[0], verdict_override={"decision": "ALLOW", "outcome": "verified"}
     ) as (endpoint, calls, consumes):
-        assert enforcement.enforce(enforcer(endpoint), "Read", {})[0]
+        assert not enforcement.enforce(enforcer(endpoint), "Read", {})[0]
         assert len(calls) == 1
 
 
-def test_strict_environment_setup_cannot_silently_disable_enforcement():
+def test_unconfigured_environment_does_not_construct_enforcement():
     names = ("GENTRAIL_DECIDE_ENDPOINT", "GENTRAIL_API_KEY")
     saved = {name: os.environ.pop(name, None) for name in names}
     try:
         for client in (enforcement.PolicyEnforcer, enforcement.AsyncPolicyEnforcer):
             assert client.from_env() is None
-            try:
-                client.from_env(strict_admission=True)
-            except ValueError:
-                pass
-            else:
-                raise AssertionError("strict setup silently disabled enforcement")
+
     finally:
         for name, value in saved.items():
             if value is not None:
@@ -269,6 +268,48 @@ def test_recovery_errors_distinguish_closed_and_uncertain_without_retry():
             else:
                 raise AssertionError("attempt did not preserve its recovery state")
             assert len(consumes) == (0 if mode in ("consumed", "released") else 1)
+
+
+def test_registered_mapping_and_fresh_parent_identity_sync_and_async():
+    for asynchronous in (False, True):
+        with server(VECTORS[0]) as (endpoint, calls, consumes):
+            mapping = {"Read": "registered-read"}
+            sync = enforcement.PolicyEnforcer(endpoint, "key", tool_ids=mapping)
+            mapping["Read"] = "changed-after-configuration"
+            client = (
+                enforcement.AsyncPolicyEnforcer.from_sync(sync)
+                if asynchronous
+                else sync
+            )
+
+            def decide(name, **options):
+                result = client.decide(name, {}, **options)
+                return asyncio.run(result) if asynchronous else result
+
+            assert decide("unregistered")["decision"] == "BLOCK"
+            assert calls == []
+            decide("Read", request_id="child", parent_request_id="parent")
+            body = calls[0][1]
+            assert body["tool_id"] == "registered-read"
+            assert body["admission_protocol"] == "operation_v1"
+            assert body["request_id"] == "child"
+            assert body["parent_request_id"] == "parent"
+            assert not consumes
+
+
+def test_approval_status_responses_are_bounded_and_validated_sync_and_async():
+    for status in ("x" * 65536, 123, None):
+        for asynchronous in (False, True):
+            with server(VECTORS[0], gate=status) as (endpoint, calls, consumes):
+                sync = enforcer(endpoint)
+                client = (
+                    enforcement.AsyncPolicyEnforcer.from_sync(sync)
+                    if asynchronous
+                    else sync
+                )
+                result = client.await_gate({"status_url": "/approval"})
+                assert (asyncio.run(result) if asynchronous else result) == "timeout"
+                assert not consumes
 
 
 if __name__ == "__main__":

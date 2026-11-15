@@ -8,11 +8,12 @@ leases replace quota-specific receipts. Missing admission, unavailable decisions
 and lost consumption replies deny execution. The `WithStrictAdmission` option
 is removed; configured enforcers always enforce this contract.
 
-Python and JavaScript admission transports now use the same policy-bound
-`operation_v1` leases and shared vectors. JavaScript enforcement and `guardTools` now require registered tool identity
-and mandatory admission. Python enforcement defaults and tool identity mapping
-still need migration; release-set updates also remain pending.
-This branch is not a coordinated client release yet.
+Python and JavaScript use the same policy-bound `operation_v1` leases and shared
+vectors. Their configured enforcers require registered tool identity and mandatory
+admission, including framework adapters. Python supports sync and async callers;
+JavaScript provides `guardTools` mappings. The old strict-admission opt-in options
+are removed. Release-set updates, application conformance and publication remain
+pending. This branch is not a coordinated client release yet.
 
 ## Previous release set
 

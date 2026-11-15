@@ -80,7 +80,7 @@ def _serve(verdict, gate_statuses=()):
         def do_POST(self):
             n = int(self.headers.get("Content-Length", 0))
             captured["body"] = json.loads(self.rfile.read(n))
-            self._send(verdict)
+            self._send({"outcome": "verified", **verdict})
 
         def do_GET(self):
             status = statuses[0] if len(statuses) == 1 else statuses.pop(0)
@@ -97,7 +97,9 @@ def _serve(verdict, gate_statuses=()):
 def _middleware_for(verdict, gate_statuses=(), agent_id="reporter"):
     srv, captured = _serve(verdict, gate_statuses)
     enf = enforcement.PolicyEnforcer(
-        f"http://127.0.0.1:{srv.server_address[1]}", "sk-test"
+        f"http://127.0.0.1:{srv.server_address[1]}",
+        "sk-test",
+        tool_ids={"run_sql": "registered-sql", "wire_transfer": "registered-wire"},
     )
     return adapter.enforcement_middleware(enf, agent_id=agent_id), captured, srv
 
@@ -112,11 +114,12 @@ def _request():
     )
 
 
-def test_allow_calls_handler_and_sends_identity():
+def test_missing_admission_cancels_and_sends_identity():
     mw, captured, srv = _middleware_for({"decision": "ALLOW"})
     result = mw.wrap_tool_call(_request(), lambda request: "TOOL_RAN")
     srv.shutdown()
-    assert result == "TOOL_RAN"
+    assert isinstance(result, FakeToolMessage)
+    assert result.status == "error"
     body = captured["body"]
     assert body["tool_name"] == "run_sql"
     assert body["tool_args"]["database"] == "production"
@@ -143,7 +146,7 @@ def test_block_short_circuits_with_error_tool_message():
     assert result.name == "run_sql"
 
 
-def test_gate_approved_runs_tool_async():
+def test_gate_approval_without_admission_cancels_async():
     enforcement.GATE_POLL_INTERVAL_SECONDS = 0.01
 
     async def handler(request):
@@ -159,7 +162,8 @@ def test_gate_approved_runs_tool_async():
     )
     result = asyncio.run(mw.awrap_tool_call(_request(), handler))
     srv.shutdown()
-    assert result == "TOOL_RAN"
+    assert isinstance(result, FakeToolMessage)
+    assert result.status == "error"
 
 
 def test_gate_denied_cancels_sync():
@@ -220,7 +224,7 @@ def test_unconfigured_environment_raises():
                 os.environ[k] = val
 
 
-def test_strict_quota_configuration_survives_both_adapter_directions():
+def test_operation_admission_survives_both_adapter_directions():
     from test_admission import VECTORS, server, enforcer
 
     for asynchronous in (False, True):
@@ -247,17 +251,17 @@ def test_strict_quota_configuration_survives_both_adapter_directions():
             assert isinstance(result, FakeToolMessage)
             assert len(consumes) == 2
             assert all(
-                body["admission_protocol"] == "quota_v1"
+                body["admission_protocol"] == "operation_v1"
                 for path, body in calls
                 if path == "/api/v1/decide"
             )
 
 
 if __name__ == "__main__":
-    test_strict_quota_configuration_survives_both_adapter_directions()
-    test_allow_calls_handler_and_sends_identity()
+    test_operation_admission_survives_both_adapter_directions()
+    test_missing_admission_cancels_and_sends_identity()
     test_block_short_circuits_with_error_tool_message()
-    test_gate_approved_runs_tool_async()
+    test_gate_approval_without_admission_cancels_async()
     test_gate_denied_cancels_sync()
     test_gate_timeout_cancels_async()
     test_unconfigured_environment_raises()

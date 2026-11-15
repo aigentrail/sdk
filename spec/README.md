@@ -26,10 +26,9 @@ Framework availability is ecosystem-specific and is recorded in the root matrix.
 D3 operation admission is mandatory for configured enforcement and uses an
 agent-bound credential plus a registered tool identity. All three admission
 transports consume the operation vectors; Python also qualifies synchronous and
-asynchronous enforcement transport. Go and JavaScript require admission for every
-executable verdict. Python's mandatory enforcement and registered tool mapping
-remain pending. Legacy vectors prove rejection in Go and JavaScript, not D3
-cross-language enforcement parity yet.
+asynchronous enforcement transport. All three require admission for every executable verdict. Legacy enforcement
+vectors prove that old admission-free responses cannot authorize execution.
+Native transport parity does not qualify application callers or publication.
 
 Policy reads do not grant execution authority. The server remains the sole owner
 of policy evaluation and quota state. Attempts remain charged after consumption,

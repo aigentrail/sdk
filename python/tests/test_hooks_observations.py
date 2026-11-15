@@ -50,8 +50,14 @@ class Enforcer:
             observation.arguments_hash(json.dumps(args)),
         )
         return dict(
-            decision=self.decision, outcome="verified", observation_reference=reference
+            decision=self.decision,
+            outcome="verified",
+            observation_reference=reference,
+            admission={"fixture": True},
         )
+
+    def authorize_admission(self, verdict):
+        return True, ""
 
     def await_gate(self, approval):
         return self.gate_status
@@ -147,7 +153,7 @@ def test_pending_receipts_are_bounded_and_missing_receipts_remain_unlinked():
     assert tracer.calls[1]["decision_reference"] is None
 
 
-def test_strict_quota_strands_hook_consumes_and_cancels_replay():
+def test_operation_strands_hook_consumes_and_cancels_replay():
     from test_admission import VECTORS, server, enforcer
 
     with server(VECTORS[0]) as (endpoint, calls, consumes):
@@ -163,7 +169,7 @@ def test_strict_quota_strands_hook_consumes_and_cancels_replay():
 
 
 if __name__ == "__main__":
-    test_strict_quota_strands_hook_consumes_and_cancels_replay()
+    test_operation_strands_hook_consumes_and_cancels_replay()
     test_results_keep_each_call_reference_and_full_arguments()
     test_cancelled_calls_never_emit_execution_observations()
     test_pending_receipts_are_bounded_and_missing_receipts_remain_unlinked()
